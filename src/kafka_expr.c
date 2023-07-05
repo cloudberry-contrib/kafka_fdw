@@ -7,6 +7,8 @@ SELECT * FROM kafka_test_part where (part between 3 and 2 and offs > 100) ;
 #include "kafka_fdw.h"
 
 #include "catalog/pg_operator.h"
+#include "cdb/cdbvars.h"
+#include "cdb/cdbutil.h"
 #include "optimizer/clauses.h"
 #include "utils/lsyscache.h"
 #include "utils/syscache.h"
@@ -197,12 +199,12 @@ getPartitionList(rd_kafka_t *kafka_handle,
     err = rd_kafka_metadata(kafka_handle, 0, kafka_topic_handle, &metadata, 5000);
 
     if (err != RD_KAFKA_RESP_ERR_NO_ERROR)
-        elog(ERROR, "%% Failed to acquire metadata: %s\n", rd_kafka_err2str(err));
+        elog(ERROR, "Failed to acquire metadata: %s\n", rd_kafka_err2str(err));
 
     if (metadata->topic_cnt != 1)
     {
         rd_kafka_metadata_destroy(metadata);
-        elog(ERROR, "%% Surprisingly got %d topics while 1 was expected", metadata->topic_cnt);
+        elog(ERROR, "Surprisingly got %d topics while 1 was expected", metadata->topic_cnt);
     }
 
     topic = &metadata->topics[0];
@@ -402,6 +404,11 @@ KafkaFlattenScanlist(List *              scan_list,
     List *    scan_op_list;
     int32     p = 0;
     int32     lowest_p, highest_p;
+    int       numsegments;
+    int       segindex;
+
+    numsegments = getgpsegmentCount();
+    segindex = GpIdentity.segindex;
 
     qsort(partition_list->partitions, partition_list->partition_cnt, sizeof(int32), cmpfunc);
     lowest_p  = partition_list->partitions[0];
@@ -478,10 +485,13 @@ KafkaFlattenScanlist(List *              scan_list,
         {
             for (p = max_int32(pl, lowest_p); p <= ph; p++)
             {
-                if (partion_member(partition_list, p))
+                if (p % numsegments == segindex)
                 {
-                    KafkaScanP scan_p = { .partition = p, .offset = ol, .offset_lim = (oh == PG_INT64_MAX ? -1 : oh) };
-                    append_scan_p(scanp_data, scan_p, batch_size);
+                    if (partion_member(partition_list, p))
+                    {
+                        KafkaScanP scan_p = { .partition = p, .offset = ol, .offset_lim = (oh == PG_INT64_MAX ? -1 : oh) };
+                        append_scan_p(scanp_data, scan_p, batch_size);
+                    }
                 }
             }
         }

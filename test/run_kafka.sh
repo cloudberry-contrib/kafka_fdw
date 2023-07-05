@@ -5,21 +5,26 @@
 #
 set -ex
 
-KAFKA_VERSION=2.8.2
-KAFKA_ARCHIVE=kafka_2.13-${KAFKA_VERSION}.tgz
+# latest stable version
+KAFKA_VERSION=3.5.0
+KAFKA_ARCHIVE=kafka_2.12-${KAFKA_VERSION}.tgz
+KAFKA_BIN_DIR=~/kafka
+
+rm -rf ${KAFKA_BIN_DIR}
+mkdir ${KAFKA_BIN_DIR}
 
 DIST=$(cat /etc/os-release | grep ^ID= | sed s/ID=//)
 
 echo
 
-# Download Apache Kafka
-wget https://archive.apache.org/dist/kafka/${KAFKA_VERSION}/${KAFKA_ARCHIVE}
-tar -xzf ${KAFKA_ARCHIVE} -C /kafka --strip-components=1
-export PATH="/kafka/bin/:$PATH"
+# # Download Apache Kafka
+wget https://downloads.apache.org/kafka/${KAFKA_VERSION}/${KAFKA_ARCHIVE}
+tar -xzf ${KAFKA_ARCHIVE} -C ${KAFKA_BIN_DIR} --strip-components=1
+export PATH="${KAFKA_BIN_DIR}/bin/:$PATH"
 
 # Configuration
-echo "advertised.listeners=PLAINTEXT://localhost:9092" >> /kafka/config/server.properties
+echo "advertised.listeners=PLAINTEXT://localhost:9092" >> ${KAFKA_BIN_DIR}/config/server.properties
 
 # Start Zookeeper and Kafka
-zookeeper-server-start.sh /kafka/config/zookeeper.properties > /tmp/zookeeper.log &
-kafka-server-start.sh /kafka/config/server.properties > /tmp/kafka.log &
+zookeeper-server-start.sh ${KAFKA_BIN_DIR}/config/zookeeper.properties > /tmp/zookeeper.log &
+kafka-server-start.sh ${KAFKA_BIN_DIR}/config/server.properties > /tmp/kafka.log &

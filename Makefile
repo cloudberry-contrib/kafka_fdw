@@ -50,6 +50,7 @@ $(EXTENSION)--$(EXTVERSION).sql: sql/$(EXTENSION).sql
 	cp $< $@
 
 prep_kafka:
+	./test/run_kafka.sh
 	./test/init_kafka.sh
 
 .PHONY:	prep_kafka

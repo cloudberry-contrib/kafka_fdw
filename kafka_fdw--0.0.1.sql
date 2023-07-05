@@ -1,9 +1,9 @@
 CREATE TABLE kafka_fdw_offset_dump(
     tbloid oid,
-    partition int,
+    "partition" int,
     "offset" int,
     last_fetch timestamp DEFAULT statement_timestamp(),
-    PRIMARY KEY(tbloid, partition)
+    PRIMARY KEY(tbloid, "partition")
 );
 SELECT pg_catalog.pg_extension_config_dump('kafka_fdw_offset_dump', '');
 

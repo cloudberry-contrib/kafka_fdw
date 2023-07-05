@@ -179,7 +179,7 @@ KafkaProcessParseOptions(ParseOptions *parse_options, List *options)
 {
     ListCell *option;
     bool      csv = false;
-    ParseOptions    default_parse_options = { .format = INVALID };
+    ParseOptions    default_parse_options = { .format = INVALID_FMT };
 
     /* Support external use for option sanity checking */
     if (parse_options == NULL)

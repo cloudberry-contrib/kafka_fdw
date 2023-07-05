@@ -2,8 +2,8 @@
 
 set -e
 
-test/run_kafka.sh
-test/run_postgres.sh
+./run_kafka.sh
+./init_kafka.sh
 
 set -x
 
@@ -20,4 +20,3 @@ if [[ ${status} -ne 0 ]] && [[ -f regression.diffs ]]; then
 fi
 
 exit ${status}
-

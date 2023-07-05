@@ -1,5 +1,5 @@
 CREATE FUNCTION kafka_get_watermarks(IN rel regclass,
-	OUT partition int,
+	OUT "partition" int,
 	OUT offset_low int,
 	OUT offset_high int)
 RETURNS SETOF record

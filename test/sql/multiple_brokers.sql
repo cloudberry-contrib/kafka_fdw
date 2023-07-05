@@ -1,7 +1,7 @@
 \i test/sql/setup.inc
 CREATE SERVER kafka_server_multi
 FOREIGN DATA WRAPPER kafka_fdw
-OPTIONS (brokers 'foo:1234,localhost:9092,bar:9784');
+OPTIONS (mpp_execute 'all segments', brokers 'foo:1234,localhost:9092,bar:9784');
 CREATE USER MAPPING FOR PUBLIC SERVER kafka_server_multi;
 
 CREATE FOREIGN TABLE kafka_test_part_multi (

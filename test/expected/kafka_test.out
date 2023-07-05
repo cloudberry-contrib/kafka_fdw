@@ -58,212 +58,269 @@ SERVER kafka_server OPTIONS
     (format 'csv', topic 'contrib_regress', batch_size '30', buffer_delay '100');
 -- check that we parse the queries right or error out if needed
 EXPLAIN (COSTS OFF) SELECT * FROM kafka_test_part WHERE offs = 1 AND part = 0;
-                QUERY PLAN                
-------------------------------------------
- Foreign Scan on kafka_test_part
-   Filter: ((offs = 1) AND (part = 0))
-   Kafka topic: contrib_regress4
-   scanning: PARTITION = 0 AND OFFSET = 1
-(4 rows)
-
-EXPLAIN (COSTS OFF) SELECT * FROM kafka_test_part WHERE part=1 AND some_int = 3 AND offs > 4 AND offs > 10 AND offs < 100;
-                                        QUERY PLAN                                         
--------------------------------------------------------------------------------------------
- Foreign Scan on kafka_test_part
-   Filter: ((offs > 4) AND (offs > 10) AND (offs < 100) AND (part = 1) AND (some_int = 3))
-   Kafka topic: contrib_regress4
-   scanning: PARTITION = 1 AND OFFSET >= 11 AND OFFSET <= 99
-(4 rows)
-
-EXPLAIN (COSTS OFF) SELECT * FROM kafka_test_part WHERE part=1 AND some_int = 3 AND offs > 4 AND offs > 10 AND offs <= 100;
-                                         QUERY PLAN                                         
---------------------------------------------------------------------------------------------
- Foreign Scan on kafka_test_part
-   Filter: ((offs > 4) AND (offs > 10) AND (offs <= 100) AND (part = 1) AND (some_int = 3))
-   Kafka topic: contrib_regress4
-   scanning: PARTITION = 1 AND OFFSET >= 11 AND OFFSET <= 100
-(4 rows)
-
-EXPLAIN (COSTS OFF) SELECT * FROM kafka_test_part WHERE (part,offs)=(1,1) OR (part,offs)=(2,1);
-                      QUERY PLAN                       
--------------------------------------------------------
- Foreign Scan on kafka_test_part
-   Filter: ((offs = 1) AND ((part = 1) OR (part = 2)))
-   Kafka topic: contrib_regress4
-   scanning: PARTITION = 1 AND OFFSET = 1
-   scanning: PARTITION = 2 AND OFFSET = 1
-(5 rows)
-
-EXPLAIN (COSTS OFF) SELECT * FROM kafka_test_part WHERE (part,offs)=(1,1) OR (part,offs)=(1,2);
-                      QUERY PLAN                       
--------------------------------------------------------
- Foreign Scan on kafka_test_part
-   Filter: ((part = 1) AND ((offs = 1) OR (offs = 2)))
-   Kafka topic: contrib_regress4
-   scanning: PARTITION = 1 AND OFFSET = 1
-   scanning: PARTITION = 1 AND OFFSET = 2
-(5 rows)
-
-EXPLAIN (COSTS OFF) SELECT * FROM kafka_test_part WHERE (part,offs)=(1,1) OR (part,offs)=(2,2);
-                               QUERY PLAN                               
-------------------------------------------------------------------------
- Foreign Scan on kafka_test_part
-   Filter: (((part = 1) AND (offs = 1)) OR ((part = 2) AND (offs = 2)))
-   Kafka topic: contrib_regress4
-   scanning: PARTITION = 1 AND OFFSET = 1
-   scanning: PARTITION = 2 AND OFFSET = 2
-(5 rows)
-
-EXPLAIN (COSTS OFF) SELECT * FROM kafka_test_part WHERE (part=1 or part=2) AND (offs=3 or offs=4);
-                              QUERY PLAN                               
------------------------------------------------------------------------
- Foreign Scan on kafka_test_part
-   Filter: (((part = 1) OR (part = 2)) AND ((offs = 3) OR (offs = 4)))
-   Kafka topic: contrib_regress4
-   scanning: PARTITION = 1 AND OFFSET = 3
-   scanning: PARTITION = 1 AND OFFSET = 4
-   scanning: PARTITION = 2 AND OFFSET = 3
-   scanning: PARTITION = 2 AND OFFSET = 4
-(7 rows)
-
-EXPLAIN (COSTS OFF) SELECT * FROM kafka_test_part WHERE (part,offs) IN((1,1),(2,2)) ;
-                               QUERY PLAN                               
-------------------------------------------------------------------------
- Foreign Scan on kafka_test_part
-   Filter: (((part = 1) AND (offs = 1)) OR ((part = 2) AND (offs = 2)))
-   Kafka topic: contrib_regress4
-   scanning: PARTITION = 1 AND OFFSET = 1
-   scanning: PARTITION = 2 AND OFFSET = 2
-(5 rows)
-
-EXPLAIN (COSTS OFF) SELECT * FROM kafka_test_part WHERE (part,offs) IN((1,1),(1,2)) ;
-                      QUERY PLAN                       
--------------------------------------------------------
- Foreign Scan on kafka_test_part
-   Filter: ((part = 1) AND ((offs = 1) OR (offs = 2)))
-   Kafka topic: contrib_regress4
-   scanning: PARTITION = 1 AND OFFSET = 1
-   scanning: PARTITION = 1 AND OFFSET = 2
-(5 rows)
-
-EXPLAIN (COSTS OFF) SELECT * FROM kafka_test_part WHERE some_int = 5 ;
-                 QUERY PLAN                 
---------------------------------------------
- Foreign Scan on kafka_test_part
-   Filter: (some_int = 5)
-   Kafka topic: contrib_regress4
-   scanning: PARTITION >= 0 AND OFFSET >= 0
-(4 rows)
-
-EXPLAIN (COSTS OFF) SELECT * FROM kafka_test_part WHERE offs > 5 AND part = 1 ;
-                QUERY PLAN                 
--------------------------------------------
- Foreign Scan on kafka_test_part
-   Filter: ((offs > 5) AND (part = 1))
-   Kafka topic: contrib_regress4
-   scanning: PARTITION = 1 AND OFFSET >= 6
-(4 rows)
-
-EXPLAIN (COSTS OFF) SELECT * FROM kafka_test_part WHERE  5 < offs AND 1 = part ;
-                QUERY PLAN                 
--------------------------------------------
- Foreign Scan on kafka_test_part
-   Filter: ((5 < offs) AND (1 = part))
-   Kafka topic: contrib_regress4
-   scanning: PARTITION = 1 AND OFFSET >= 6
-(4 rows)
-
-EXPLAIN (COSTS OFF) SELECT * FROM kafka_test_part WHERE ((part = 1 or part = 2) and offs = 3) OR (part = 4 and offs=7);
-                                       QUERY PLAN                                       
-----------------------------------------------------------------------------------------
- Foreign Scan on kafka_test_part
-   Filter: ((((part = 1) OR (part = 2)) AND (offs = 3)) OR ((part = 4) AND (offs = 7)))
-   Kafka topic: contrib_regress4
-   scanning: PARTITION = 1 AND OFFSET = 3
-   scanning: PARTITION = 2 AND OFFSET = 3
-   scanning: PARTITION = 4 AND OFFSET = 7
+                   QUERY PLAN                   
+------------------------------------------------
+ Gather Motion 3:1  (slice1; segments: 3)
+   ->  Foreign Scan on kafka_test_part
+         Filter: ((offs = 1) AND (part = 0))
+         Kafka topic: contrib_regress4
+         scanning: PARTITION = 0 AND OFFSET = 1
+ Optimizer: Postgres query optimizer
 (6 rows)
 
-EXPLAIN (COSTS OFF) SELECT * FROM kafka_test_part WHERE ((part = 1 or part = 2) and offs = 3) OR ((part = 4 and offs=7 ) or ( part = 5 and (offs = 10 or offs=12)) );
-                                                               QUERY PLAN                                                                
------------------------------------------------------------------------------------------------------------------------------------------
- Foreign Scan on kafka_test_part
-   Filter: ((((part = 1) OR (part = 2)) AND (offs = 3)) OR ((part = 4) AND (offs = 7)) OR ((part = 5) AND ((offs = 10) OR (offs = 12))))
-   Kafka topic: contrib_regress4
-   scanning: PARTITION = 1 AND OFFSET = 3
-   scanning: PARTITION = 2 AND OFFSET = 3
-   scanning: PARTITION = 4 AND OFFSET = 7
-   scanning: PARTITION = 5 AND OFFSET = 10
-   scanning: PARTITION = 5 AND OFFSET = 12
+EXPLAIN (COSTS OFF) SELECT * FROM kafka_test_part WHERE part=1 AND some_int = 3 AND offs > 4 AND offs > 10 AND offs < 100;
+                                           QUERY PLAN                                            
+-------------------------------------------------------------------------------------------------
+ Gather Motion 3:1  (slice1; segments: 3)
+   ->  Foreign Scan on kafka_test_part
+         Filter: ((offs > 4) AND (offs > 10) AND (offs < 100) AND (part = 1) AND (some_int = 3))
+         Kafka topic: contrib_regress4
+         scanning: PARTITION = 1 AND OFFSET >= 11 AND OFFSET <= 99
+ Optimizer: Postgres query optimizer
+(6 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM kafka_test_part WHERE part=1 AND some_int = 3 AND offs > 4 AND offs > 10 AND offs <= 100;
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ Gather Motion 3:1  (slice1; segments: 3)
+   ->  Foreign Scan on kafka_test_part
+         Filter: ((offs > 4) AND (offs > 10) AND (offs <= 100) AND (part = 1) AND (some_int = 3))
+         Kafka topic: contrib_regress4
+         scanning: PARTITION = 1 AND OFFSET >= 11 AND OFFSET <= 100
+ Optimizer: Postgres query optimizer
+(6 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM kafka_test_part WHERE (part,offs)=(1,1) OR (part,offs)=(2,1);
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Gather Motion 3:1  (slice1; segments: 3)
+   ->  Foreign Scan on kafka_test_part
+         Filter: ((offs = 1) AND ((part = 1) OR (part = 2)))
+         Kafka topic: contrib_regress4
+         scanning: PARTITION = 1 AND OFFSET = 1
+         scanning: PARTITION = 2 AND OFFSET = 1
+ Optimizer: Postgres query optimizer
+(7 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM kafka_test_part WHERE (part,offs)=(1,1) OR (part,offs)=(1,2);
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Gather Motion 3:1  (slice1; segments: 3)
+   ->  Foreign Scan on kafka_test_part
+         Filter: ((part = 1) AND ((offs = 1) OR (offs = 2)))
+         Kafka topic: contrib_regress4
+         scanning: PARTITION = 1 AND OFFSET = 1
+         scanning: PARTITION = 1 AND OFFSET = 2
+ Optimizer: Postgres query optimizer
+(7 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM kafka_test_part WHERE (part,offs)=(1,1) OR (part,offs)=(2,2);
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
+ Gather Motion 3:1  (slice1; segments: 3)
+   ->  Foreign Scan on kafka_test_part
+         Filter: (((part = 1) AND (offs = 1)) OR ((part = 2) AND (offs = 2)))
+         Kafka topic: contrib_regress4
+         scanning: PARTITION = 1 AND OFFSET = 1
+         scanning: PARTITION = 2 AND OFFSET = 2
+ Optimizer: Postgres query optimizer
+(7 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM kafka_test_part WHERE (part=1 or part=2) AND (offs=3 or offs=4);
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Gather Motion 3:1  (slice1; segments: 3)
+   ->  Foreign Scan on kafka_test_part
+         Filter: (((part = 1) OR (part = 2)) AND ((offs = 3) OR (offs = 4)))
+         Kafka topic: contrib_regress4
+         scanning: PARTITION = 1 AND OFFSET = 3
+         scanning: PARTITION = 1 AND OFFSET = 4
+         scanning: PARTITION = 2 AND OFFSET = 3
+         scanning: PARTITION = 2 AND OFFSET = 4
+ Optimizer: Postgres query optimizer
+(9 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM kafka_test_part WHERE (part,offs) IN((1,1),(2,2)) ;
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
+ Gather Motion 3:1  (slice1; segments: 3)
+   ->  Foreign Scan on kafka_test_part
+         Filter: (((part = 1) AND (offs = 1)) OR ((part = 2) AND (offs = 2)))
+         Kafka topic: contrib_regress4
+         scanning: PARTITION = 1 AND OFFSET = 1
+         scanning: PARTITION = 2 AND OFFSET = 2
+ Optimizer: Postgres query optimizer
+(7 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM kafka_test_part WHERE (part,offs) IN((1,1),(1,2)) ;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Gather Motion 3:1  (slice1; segments: 3)
+   ->  Foreign Scan on kafka_test_part
+         Filter: ((part = 1) AND ((offs = 1) OR (offs = 2)))
+         Kafka topic: contrib_regress4
+         scanning: PARTITION = 1 AND OFFSET = 1
+         scanning: PARTITION = 1 AND OFFSET = 2
+ Optimizer: Postgres query optimizer
+(7 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM kafka_test_part WHERE some_int = 5 ;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Gather Motion 3:1  (slice1; segments: 3)
+   ->  Foreign Scan on kafka_test_part
+         Filter: (some_int = 5)
+         Kafka topic: contrib_regress4
+         scanning: PARTITION >= 0 AND OFFSET >= 0
+ Optimizer: Postgres query optimizer
+(6 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM kafka_test_part WHERE offs > 5 AND part = 1 ;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Gather Motion 3:1  (slice1; segments: 3)
+   ->  Foreign Scan on kafka_test_part
+         Filter: ((offs > 5) AND (part = 1))
+         Kafka topic: contrib_regress4
+         scanning: PARTITION = 1 AND OFFSET >= 6
+ Optimizer: Postgres query optimizer
+(6 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM kafka_test_part WHERE  5 < offs AND 1 = part ;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Gather Motion 3:1  (slice1; segments: 3)
+   ->  Foreign Scan on kafka_test_part
+         Filter: ((5 < offs) AND (1 = part))
+         Kafka topic: contrib_regress4
+         scanning: PARTITION = 1 AND OFFSET >= 6
+ Optimizer: Postgres query optimizer
+(6 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM kafka_test_part WHERE ((part = 1 or part = 2) and offs = 3) OR (part = 4 and offs=7);
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ Gather Motion 3:1  (slice1; segments: 3)
+   ->  Foreign Scan on kafka_test_part
+         Filter: ((((part = 1) OR (part = 2)) AND (offs = 3)) OR ((part = 4) AND (offs = 7)))
+         Kafka topic: contrib_regress4
+         scanning: PARTITION = 1 AND OFFSET = 3
+         scanning: PARTITION = 2 AND OFFSET = 3
+         scanning: PARTITION = 4 AND OFFSET = 7
+ Optimizer: Postgres query optimizer
 (8 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM kafka_test_part WHERE ((part = 1 or part = 2) and offs = 3) OR ((part = 4 and offs=7 ) or ( part = 5 and (offs = 10 or offs=12)) );
+                                                                  QUERY PLAN                                                                   
+-----------------------------------------------------------------------------------------------------------------------------------------------
+ Gather Motion 3:1  (slice1; segments: 3)
+   ->  Foreign Scan on kafka_test_part
+         Filter: ((((part = 1) OR (part = 2)) AND (offs = 3)) OR ((part = 4) AND (offs = 7)) OR ((part = 5) AND ((offs = 10) OR (offs = 12))))
+         Kafka topic: contrib_regress4
+         scanning: PARTITION = 1 AND OFFSET = 3
+         scanning: PARTITION = 2 AND OFFSET = 3
+         scanning: PARTITION = 4 AND OFFSET = 7
+         scanning: PARTITION = 5 AND OFFSET = 10
+         scanning: PARTITION = 5 AND OFFSET = 12
+ Optimizer: Postgres query optimizer
+(10 rows)
 
 -- check parameterized queries
 SELECT explain_invariant('SELECT * FROM kafka_test_part WHERE offs = (SELECT 1) AND part = 0');
-                    explain_invariant                    
----------------------------------------------------------
- Foreign Scan on kafka_test_part (actual rows=1 loops=1)
-   Filter: ((offs = $0) AND (part = 0))
-   Kafka topic: contrib_regress4
-   scanning: PARTITION 0 AND OFFSET >= 1 AND OFFSET <= 1
-   InitPlan 1 (returns $0)
+                                 explain_invariant                                 
+-----------------------------------------------------------------------------------
+ Gather Motion 3:1  (slice1; segments: 3) (actual rows=1 loops=1)
+   InitPlan 1 (returns $0)  (slice2)
      ->  Result (actual rows=1 loops=1)
-(6 rows)
+   ->  Foreign Scan on kafka_test_part (actual rows=1 loops=1)
+         Filter: ((offs = $0) AND (part = 0))
+         Kafka topic: contrib_regress4
+   (slice0)    Executor memory: 115K bytes.
+   (slice1)    Executor memory: 123K bytes avg x 3 workers, 123K bytes max (seg0).
+   (slice2)    Executor memory: 26K bytes.
+ Memory used:  128000kB
+ Optimizer: Postgres query optimizer
+(11 rows)
 
 SELECT explain_invariant('SELECT * FROM kafka_test_part WHERE offs = 0 AND part = (SELECT 1)');
-                    explain_invariant                    
----------------------------------------------------------
- Foreign Scan on kafka_test_part (actual rows=1 loops=1)
-   Filter: ((offs = 0) AND (part = $0))
-   Kafka topic: contrib_regress4
-   scanning: PARTITION 1 AND OFFSET >= 0 AND OFFSET <= 0
-   InitPlan 1 (returns $0)
+                                 explain_invariant                                 
+-----------------------------------------------------------------------------------
+ Gather Motion 3:1  (slice1; segments: 3) (actual rows=1 loops=1)
+   InitPlan 1 (returns $0)  (slice2)
      ->  Result (actual rows=1 loops=1)
-(6 rows)
+   ->  Foreign Scan on kafka_test_part (actual rows=1 loops=1)
+         Filter: ((offs = 0) AND (part = $0))
+         Kafka topic: contrib_regress4
+   (slice0)    Executor memory: 115K bytes.
+   (slice1)    Executor memory: 115K bytes avg x 3 workers, 115K bytes max (seg0).
+   (slice2)    Executor memory: 26K bytes.
+ Memory used:  128000kB
+ Optimizer: Postgres query optimizer
+(11 rows)
 
 SELECT explain_invariant('SELECT * FROM kafka_test_part WHERE offs < (SELECT 1) AND part = 0');
-                    explain_invariant                    
----------------------------------------------------------
- Foreign Scan on kafka_test_part (actual rows=1 loops=1)
-   Filter: ((offs < $0) AND (part = 0))
-   Kafka topic: contrib_regress4
-   scanning: PARTITION 0 AND OFFSET >= 0 AND OFFSET <= 0
-   InitPlan 1 (returns $0)
+                                 explain_invariant                                 
+-----------------------------------------------------------------------------------
+ Gather Motion 3:1  (slice1; segments: 3) (actual rows=1 loops=1)
+   InitPlan 1 (returns $0)  (slice2)
      ->  Result (actual rows=1 loops=1)
-(6 rows)
+   ->  Foreign Scan on kafka_test_part (actual rows=1 loops=1)
+         Filter: ((offs < $0) AND (part = 0))
+         Kafka topic: contrib_regress4
+   (slice0)    Executor memory: 115K bytes.
+   (slice1)    Executor memory: 115K bytes avg x 3 workers, 115K bytes max (seg0).
+   (slice2)    Executor memory: 26K bytes.
+ Memory used:  128000kB
+ Optimizer: Postgres query optimizer
+(11 rows)
 
 SELECT explain_invariant('SELECT * FROM kafka_test_part WHERE offs <= (SELECT 1) AND part = 0');
-                    explain_invariant                    
----------------------------------------------------------
- Foreign Scan on kafka_test_part (actual rows=2 loops=1)
-   Filter: ((offs <= $0) AND (part = 0))
-   Kafka topic: contrib_regress4
-   scanning: PARTITION 0 AND OFFSET >= 0 AND OFFSET <= 1
-   InitPlan 1 (returns $0)
+                                 explain_invariant                                 
+-----------------------------------------------------------------------------------
+ Gather Motion 3:1  (slice1; segments: 3) (actual rows=2 loops=1)
+   InitPlan 1 (returns $0)  (slice2)
      ->  Result (actual rows=1 loops=1)
-(6 rows)
+   ->  Foreign Scan on kafka_test_part (actual rows=2 loops=1)
+         Filter: ((offs <= $0) AND (part = 0))
+         Kafka topic: contrib_regress4
+   (slice0)    Executor memory: 115K bytes.
+   (slice1)    Executor memory: 115K bytes avg x 3 workers, 115K bytes max (seg0).
+   (slice2)    Executor memory: 26K bytes.
+ Memory used:  128000kB
+ Optimizer: Postgres query optimizer
+(11 rows)
 
 SELECT explain_invariant('SELECT * FROM kafka_test_part WHERE offs = 0 AND part < (SELECT 1)');
-                    explain_invariant                    
----------------------------------------------------------
- Foreign Scan on kafka_test_part (actual rows=1 loops=1)
-   Filter: ((part < $0) AND (offs = 0))
-   Kafka topic: contrib_regress4
-   scanning: PARTITION 0 AND OFFSET >= 0 AND OFFSET <= 0
-   InitPlan 1 (returns $0)
+                                 explain_invariant                                 
+-----------------------------------------------------------------------------------
+ Gather Motion 3:1  (slice1; segments: 3) (actual rows=1 loops=1)
+   InitPlan 1 (returns $0)  (slice2)
      ->  Result (actual rows=1 loops=1)
-(6 rows)
+   ->  Foreign Scan on kafka_test_part (actual rows=1 loops=1)
+         Filter: ((part < $0) AND (offs = 0))
+         Kafka topic: contrib_regress4
+   (slice0)    Executor memory: 115K bytes.
+   (slice1)    Executor memory: 115K bytes avg x 3 workers, 115K bytes max (seg0).
+   (slice2)    Executor memory: 26K bytes.
+ Memory used:  128000kB
+ Optimizer: Postgres query optimizer
+(11 rows)
 
 SELECT explain_invariant('SELECT * FROM kafka_test_part WHERE offs = 0 AND part <= (SELECT 1)');
-                    explain_invariant                    
----------------------------------------------------------
- Foreign Scan on kafka_test_part (actual rows=2 loops=1)
-   Filter: ((part <= $0) AND (offs = 0))
-   Kafka topic: contrib_regress4
-   scanning: PARTITION 0 AND OFFSET >= 0 AND OFFSET <= 0
-   scanning: PARTITION 1 AND OFFSET >= 0 AND OFFSET <= 0
-   InitPlan 1 (returns $0)
+                                 explain_invariant                                 
+-----------------------------------------------------------------------------------
+ Gather Motion 3:1  (slice1; segments: 3) (actual rows=2 loops=1)
+   InitPlan 1 (returns $0)  (slice2)
      ->  Result (actual rows=1 loops=1)
-(7 rows)
+   ->  Foreign Scan on kafka_test_part (actual rows=1 loops=1)
+         Filter: ((part <= $0) AND (offs = 0))
+         Kafka topic: contrib_regress4
+   (slice0)    Executor memory: 115K bytes.
+   (slice1)    Executor memory: 115K bytes avg x 3 workers, 115K bytes max (seg0).
+   (slice2)    Executor memory: 26K bytes.
+ Memory used:  128000kB
+ Optimizer: Postgres query optimizer
+(11 rows)
 
 -- run some memload
 select count(*) from (select json_agg(s) from generate_series(1, 1000000) s) a;
@@ -561,26 +618,30 @@ SELECT COUNT(*) FROM kafka_test_part WHERE (part = 1 AND offs BETWEEN 1 AND 2) O
 
 PREPARE kafka_test(int,bigint,bigint, int,bigint,bigint) AS SELECT COUNT(*) FROM kafka_test_part WHERE (part = $1 AND offs BETWEEN $2 AND $3) OR ((part = $4 AND offs BETWEEN $5 AND $6) );
 EXPLAIN (COSTS OFF) EXECUTE kafka_test(1,100,200,1,500,600);
-                                                                    QUERY PLAN                                                                     
----------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                       QUERY PLAN                                                                        
+---------------------------------------------------------------------------------------------------------------------------------------------------------
  Aggregate
-   ->  Foreign Scan on kafka_test_part
-         Filter: ((part = 1) AND (((offs >= '100'::bigint) AND (offs <= '200'::bigint)) OR ((offs >= '500'::bigint) AND (offs <= '600'::bigint))))
-         Kafka topic: contrib_regress4
-         scanning: PARTITION = 1 AND OFFSET >= 100 AND OFFSET <= 200
-         scanning: PARTITION = 1 AND OFFSET >= 500 AND OFFSET <= 600
-(6 rows)
+   ->  Gather Motion 3:1  (slice1; segments: 3)
+         ->  Foreign Scan on kafka_test_part
+               Filter: ((part = 1) AND (((offs >= '100'::bigint) AND (offs <= '200'::bigint)) OR ((offs >= '500'::bigint) AND (offs <= '600'::bigint))))
+               Kafka topic: contrib_regress4
+               scanning: PARTITION = 1 AND OFFSET >= 100 AND OFFSET <= 200
+               scanning: PARTITION = 1 AND OFFSET >= 500 AND OFFSET <= 600
+ Optimizer: Postgres query optimizer
+(8 rows)
 
 EXPLAIN (COSTS OFF) EXECUTE kafka_test(1,1,2,1,5,6);
-                                                                QUERY PLAN                                                                 
--------------------------------------------------------------------------------------------------------------------------------------------
+                                                                   QUERY PLAN                                                                    
+-------------------------------------------------------------------------------------------------------------------------------------------------
  Aggregate
-   ->  Foreign Scan on kafka_test_part
-         Filter: ((part = 1) AND (((offs >= '1'::bigint) AND (offs <= '2'::bigint)) OR ((offs >= '5'::bigint) AND (offs <= '6'::bigint))))
-         Kafka topic: contrib_regress4
-         scanning: PARTITION = 1 AND OFFSET >= 1 AND OFFSET <= 2
-         scanning: PARTITION = 1 AND OFFSET >= 5 AND OFFSET <= 6
-(6 rows)
+   ->  Gather Motion 3:1  (slice1; segments: 3)
+         ->  Foreign Scan on kafka_test_part
+               Filter: ((part = 1) AND (((offs >= '1'::bigint) AND (offs <= '2'::bigint)) OR ((offs >= '5'::bigint) AND (offs <= '6'::bigint))))
+               Kafka topic: contrib_regress4
+               scanning: PARTITION = 1 AND OFFSET >= 1 AND OFFSET <= 2
+               scanning: PARTITION = 1 AND OFFSET >= 5 AND OFFSET <= 6
+ Optimizer: Postgres query optimizer
+(8 rows)
 
 -- test utils
 SELECT SUM(offset_low), SUM(offset_high) FROM kafka_get_watermarks('kafka_test_part');
