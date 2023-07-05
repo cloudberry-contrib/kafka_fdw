@@ -57,6 +57,7 @@ installcheck: submake $(REGRESS_PREP)
 	PGOPTIONS=$(PGOPTIONS) $(pg_regress_installcheck) $(REGRESS_OPTS) $(REGRESS)
 
 prep_kafka:
+	./test/run_kafka.sh
 	./test/init_kafka.sh
 
 .PHONY:	prep_kafka

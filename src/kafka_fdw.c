@@ -252,7 +252,7 @@ kafkaGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid)
     }
 #endif
 
-    add_path(baserel, foreign_path);
+    add_path(baserel, foreign_path, root);
 }
 
 /*

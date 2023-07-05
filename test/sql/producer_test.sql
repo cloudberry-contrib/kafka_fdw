@@ -23,9 +23,7 @@ INSERT INTO kafka_test_prod(part, some_int, some_text, some_date)
     (1, 7,'foo bar 7','2017-01-07'),
     (1, 8,'foo text 8','2017-01-08'),
     (1, 9,'foo text 9','2017-01-09'),
-    (1, 10,'foo text 10','2017-01-10')
-
-RETURNING *;
+    (1, 10,'foo text 10','2017-01-10');
 
 -- run some memload
 select count(*) from (select json_agg(s) from generate_series(1, 1000000) s) a;
@@ -37,7 +35,7 @@ select count(*) from (select json_agg(s) from generate_series(1, 1000000) s) a;
 select count(*) from (select json_agg(s) from generate_series(1, 1000000) s) a;
 
 
-SELECT * FROM kafka_test_prod WHERE offs >= 0 and part=1;
+SELECT count(*) FROM kafka_test_prod WHERE offs >= 0 and part=1;
 
 INSERT INTO kafka_test_prod(some_int, some_text, some_date, some_time)
 SELECT i,

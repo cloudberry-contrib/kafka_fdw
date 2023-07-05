@@ -55,7 +55,7 @@
 #endif
 
 #define DEFAULT_KAFKA_OPTIONS                                                                                          \
-    .batch_size = 1000, .buffer_delay = 100, .offset_attnum = -1, .partition_attnum = -1, .junk_attnum = -1,           \
+    .batch_size = 1000, .buffer_delay = 1000, .offset_attnum = -1, .partition_attnum = -1, .junk_attnum = -1,           \
     .junk_error_attnum = -1, .strict = false, .num_parse_col = 0, .ignore_junk = false, .num_partitions = 10
 
 #define parsable_attnum(_attn, _kop)                                                                                   \
@@ -71,7 +71,7 @@
 
 enum kafka_msg_format
 {
-    INVALID = -1,
+    INVALID_FMT = -1,
     JSON,
     CSV
 };

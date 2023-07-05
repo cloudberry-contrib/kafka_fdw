@@ -54,7 +54,8 @@ KafkaEstimateSize(PlannerInfo *root, RelOptInfo *baserel, KafkaFdwPlanState *fdw
                                    baserel->baserestrictinfo,
                                    0,
                                    JOIN_INNER,
-                                   NULL);
+                                   NULL,
+                                   false);
         npart = kafka_options->num_partitions;  /* can't get it from statistics */
     }
     /* No statistics, try to guess */
