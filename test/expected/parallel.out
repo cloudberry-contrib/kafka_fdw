@@ -22,32 +22,31 @@ ANALYZE kafka_test_part;
 EXPLAIN (COSTS OFF) SELECT * FROM kafka_test_part ;
                     QUERY PLAN                    
 --------------------------------------------------
- Gather
-   Workers Planned: 2
-   ->  Parallel Foreign Scan on kafka_test_part
+ Gather Motion 3:1  (slice1; segments: 3)
+   ->  Foreign Scan on kafka_test_part
          Kafka topic: contrib_regress4
          scanning: PARTITION >= 0 AND OFFSET >= 0
+ Optimizer: Postgres query optimizer
 (5 rows)
 
 EXPLAIN (COSTS OFF) SELECT * FROM kafka_test_part WHERE ((part = 1 or part = 2) and offs = 3) OR (part = 4 and offs=7);
                                           QUERY PLAN                                          
 ----------------------------------------------------------------------------------------------
- Gather
-   Workers Planned: 2
-   ->  Parallel Foreign Scan on kafka_test_part
+ Gather Motion 3:1  (slice1; segments: 3)
+   ->  Foreign Scan on kafka_test_part
          Filter: ((((part = 1) OR (part = 2)) AND (offs = 3)) OR ((part = 4) AND (offs = 7)))
          Kafka topic: contrib_regress4
          scanning: PARTITION = 1 AND OFFSET = 3
          scanning: PARTITION = 2 AND OFFSET = 3
          scanning: PARTITION = 4 AND OFFSET = 7
+ Optimizer: Postgres query optimizer
 (8 rows)
 
 EXPLAIN (COSTS OFF) SELECT * FROM kafka_test_part WHERE ((part = 1 or part = 2) and offs = 3) OR ((part = 4 and offs=7 ) or ( part = 5 and (offs = 10 or offs=12)) );
                                                                   QUERY PLAN                                                                   
 -----------------------------------------------------------------------------------------------------------------------------------------------
- Gather
-   Workers Planned: 2
-   ->  Parallel Foreign Scan on kafka_test_part
+ Gather Motion 3:1  (slice1; segments: 3)
+   ->  Foreign Scan on kafka_test_part
          Filter: ((((part = 1) OR (part = 2)) AND (offs = 3)) OR ((part = 4) AND (offs = 7)) OR ((part = 5) AND ((offs = 10) OR (offs = 12))))
          Kafka topic: contrib_regress4
          scanning: PARTITION = 1 AND OFFSET = 3
@@ -55,5 +54,6 @@ EXPLAIN (COSTS OFF) SELECT * FROM kafka_test_part WHERE ((part = 1 or part = 2) 
          scanning: PARTITION = 4 AND OFFSET = 7
          scanning: PARTITION = 5 AND OFFSET = 10
          scanning: PARTITION = 5 AND OFFSET = 12
+ Optimizer: Postgres query optimizer
 (10 rows)
 

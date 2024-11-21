@@ -227,8 +227,8 @@ EXPLAIN (COSTS OFF) SELECT * FROM kafka_test_part WHERE ((part = 1 or part = 2) 
 
 -- check parameterized queries
 SELECT explain_invariant('SELECT * FROM kafka_test_part WHERE offs = (SELECT 1) AND part = 0');
-                                 explain_invariant                                 
------------------------------------------------------------------------------------
+                                   explain_invariant                                   
+---------------------------------------------------------------------------------------
  Gather Motion 3:1  (slice1; segments: 3) (actual rows=1 loops=1)
    InitPlan 1 (returns $0)  (slice2)
      ->  Result (actual rows=1 loops=1)
@@ -243,8 +243,8 @@ SELECT explain_invariant('SELECT * FROM kafka_test_part WHERE offs = (SELECT 1) 
 (11 rows)
 
 SELECT explain_invariant('SELECT * FROM kafka_test_part WHERE offs = 0 AND part = (SELECT 1)');
-                                 explain_invariant                                 
------------------------------------------------------------------------------------
+                                   explain_invariant                                   
+---------------------------------------------------------------------------------------
  Gather Motion 3:1  (slice1; segments: 3) (actual rows=1 loops=1)
    InitPlan 1 (returns $0)  (slice2)
      ->  Result (actual rows=1 loops=1)
@@ -259,8 +259,8 @@ SELECT explain_invariant('SELECT * FROM kafka_test_part WHERE offs = 0 AND part 
 (11 rows)
 
 SELECT explain_invariant('SELECT * FROM kafka_test_part WHERE offs < (SELECT 1) AND part = 0');
-                                 explain_invariant                                 
------------------------------------------------------------------------------------
+                                   explain_invariant                                   
+---------------------------------------------------------------------------------------
  Gather Motion 3:1  (slice1; segments: 3) (actual rows=1 loops=1)
    InitPlan 1 (returns $0)  (slice2)
      ->  Result (actual rows=1 loops=1)
@@ -275,8 +275,8 @@ SELECT explain_invariant('SELECT * FROM kafka_test_part WHERE offs < (SELECT 1) 
 (11 rows)
 
 SELECT explain_invariant('SELECT * FROM kafka_test_part WHERE offs <= (SELECT 1) AND part = 0');
-                                 explain_invariant                                 
------------------------------------------------------------------------------------
+                                   explain_invariant                                   
+---------------------------------------------------------------------------------------
  Gather Motion 3:1  (slice1; segments: 3) (actual rows=2 loops=1)
    InitPlan 1 (returns $0)  (slice2)
      ->  Result (actual rows=1 loops=1)
@@ -291,8 +291,8 @@ SELECT explain_invariant('SELECT * FROM kafka_test_part WHERE offs <= (SELECT 1)
 (11 rows)
 
 SELECT explain_invariant('SELECT * FROM kafka_test_part WHERE offs = 0 AND part < (SELECT 1)');
-                                 explain_invariant                                 
------------------------------------------------------------------------------------
+                                   explain_invariant                                   
+---------------------------------------------------------------------------------------
  Gather Motion 3:1  (slice1; segments: 3) (actual rows=1 loops=1)
    InitPlan 1 (returns $0)  (slice2)
      ->  Result (actual rows=1 loops=1)
@@ -307,8 +307,8 @@ SELECT explain_invariant('SELECT * FROM kafka_test_part WHERE offs = 0 AND part 
 (11 rows)
 
 SELECT explain_invariant('SELECT * FROM kafka_test_part WHERE offs = 0 AND part <= (SELECT 1)');
-                                 explain_invariant                                 
------------------------------------------------------------------------------------
+                                   explain_invariant                                   
+---------------------------------------------------------------------------------------
  Gather Motion 3:1  (slice1; segments: 3) (actual rows=2 loops=1)
    InitPlan 1 (returns $0)  (slice2)
      ->  Result (actual rows=1 loops=1)
@@ -618,30 +618,32 @@ SELECT COUNT(*) FROM kafka_test_part WHERE (part = 1 AND offs BETWEEN 1 AND 2) O
 
 PREPARE kafka_test(int,bigint,bigint, int,bigint,bigint) AS SELECT COUNT(*) FROM kafka_test_part WHERE (part = $1 AND offs BETWEEN $2 AND $3) OR ((part = $4 AND offs BETWEEN $5 AND $6) );
 EXPLAIN (COSTS OFF) EXECUTE kafka_test(1,100,200,1,500,600);
-                                                                       QUERY PLAN                                                                        
----------------------------------------------------------------------------------------------------------------------------------------------------------
- Aggregate
+                                                                          QUERY PLAN                                                                           
+---------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Finalize Aggregate
    ->  Gather Motion 3:1  (slice1; segments: 3)
-         ->  Foreign Scan on kafka_test_part
-               Filter: ((part = 1) AND (((offs >= '100'::bigint) AND (offs <= '200'::bigint)) OR ((offs >= '500'::bigint) AND (offs <= '600'::bigint))))
-               Kafka topic: contrib_regress4
-               scanning: PARTITION = 1 AND OFFSET >= 100 AND OFFSET <= 200
-               scanning: PARTITION = 1 AND OFFSET >= 500 AND OFFSET <= 600
+         ->  Partial Aggregate
+               ->  Foreign Scan on kafka_test_part
+                     Filter: ((part = 1) AND (((offs >= '100'::bigint) AND (offs <= '200'::bigint)) OR ((offs >= '500'::bigint) AND (offs <= '600'::bigint))))
+                     Kafka topic: contrib_regress4
+                     scanning: PARTITION = 1 AND OFFSET >= 100 AND OFFSET <= 200
+                     scanning: PARTITION = 1 AND OFFSET >= 500 AND OFFSET <= 600
  Optimizer: Postgres query optimizer
-(8 rows)
+(9 rows)
 
 EXPLAIN (COSTS OFF) EXECUTE kafka_test(1,1,2,1,5,6);
-                                                                   QUERY PLAN                                                                    
--------------------------------------------------------------------------------------------------------------------------------------------------
- Aggregate
+                                                                      QUERY PLAN                                                                       
+-------------------------------------------------------------------------------------------------------------------------------------------------------
+ Finalize Aggregate
    ->  Gather Motion 3:1  (slice1; segments: 3)
-         ->  Foreign Scan on kafka_test_part
-               Filter: ((part = 1) AND (((offs >= '1'::bigint) AND (offs <= '2'::bigint)) OR ((offs >= '5'::bigint) AND (offs <= '6'::bigint))))
-               Kafka topic: contrib_regress4
-               scanning: PARTITION = 1 AND OFFSET >= 1 AND OFFSET <= 2
-               scanning: PARTITION = 1 AND OFFSET >= 5 AND OFFSET <= 6
+         ->  Partial Aggregate
+               ->  Foreign Scan on kafka_test_part
+                     Filter: ((part = 1) AND (((offs >= '1'::bigint) AND (offs <= '2'::bigint)) OR ((offs >= '5'::bigint) AND (offs <= '6'::bigint))))
+                     Kafka topic: contrib_regress4
+                     scanning: PARTITION = 1 AND OFFSET >= 1 AND OFFSET <= 2
+                     scanning: PARTITION = 1 AND OFFSET >= 5 AND OFFSET <= 6
  Optimizer: Postgres query optimizer
-(8 rows)
+(9 rows)
 
 -- test utils
 SELECT SUM(offset_low), SUM(offset_high) FROM kafka_get_watermarks('kafka_test_part');

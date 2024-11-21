@@ -6,8 +6,8 @@
 set -ex
 
 # latest stable version
-KAFKA_VERSION=3.5.0
-KAFKA_ARCHIVE=kafka_2.12-${KAFKA_VERSION}.tgz
+KAFKA_VERSION=3.8.0
+KAFKA_ARCHIVE=kafka_2.13-${KAFKA_VERSION}.tgz
 KAFKA_BIN_DIR=~/kafka
 
 rm -rf ${KAFKA_BIN_DIR}
