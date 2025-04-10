@@ -18,7 +18,7 @@ DIST=$(cat /etc/os-release | grep ^ID= | sed s/ID=//)
 echo
 
 # # Download Apache Kafka
-wget https://downloads.apache.org/kafka/${KAFKA_VERSION}/${KAFKA_ARCHIVE}
+wget https://hashdata-releng-2.obs.cn-north-4.myhuaweicloud.com/cache/docker/devel-sources/kafka/${KAFKA_ARCHIVE}
 tar -xzf ${KAFKA_ARCHIVE} -C ${KAFKA_BIN_DIR} --strip-components=1
 export PATH="${KAFKA_BIN_DIR}/bin/:$PATH"
 
