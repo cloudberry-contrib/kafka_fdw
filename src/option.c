@@ -487,6 +487,24 @@ get_kafka_fdw_attribute_options(Oid relid, KafkaOptions *kafka_options)
         }
     }
 
+	if (rel->rd_rel->relkind == RELKIND_FOREIGN_TABLE)
+	{
+		if (kafka_options->partition_attnum == -1)
+		{
+			ereport(ERROR,
+					(errcode(ERRCODE_FDW_ERROR),
+					errmsg("missing column definition with option (partition 'true')"),
+					errhint("Specify a column and set its option to (partition 'true')")));
+		}
+		if (kafka_options->offset_attnum == -1)
+		{
+			ereport(ERROR,
+					(errcode(ERRCODE_FDW_ERROR),
+					errmsg("missing column definition with option (offset 'true')"),
+					errhint("Specify a column and set its option to (offset 'true')")));
+		}
+	}
+
     /* calculate number of parsable columns */
 
     if (kafka_options->partition_attnum != -1)

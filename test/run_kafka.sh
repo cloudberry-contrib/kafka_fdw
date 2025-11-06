@@ -18,7 +18,9 @@ DIST=$(cat /etc/os-release | grep ^ID= | sed s/ID=//)
 echo
 
 # # Download Apache Kafka
-wget https://downloads.apache.org/kafka/${KAFKA_VERSION}/${KAFKA_ARCHIVE}
+if [ ! -f "${KAFKA_ARCHIVE}" ]; then
+    wget https://downloads.apache.org/kafka/${KAFKA_VERSION}/${KAFKA_ARCHIVE}
+fi
 tar -xzf ${KAFKA_ARCHIVE} -C ${KAFKA_BIN_DIR} --strip-components=1
 export PATH="${KAFKA_BIN_DIR}/bin/:$PATH"
 
