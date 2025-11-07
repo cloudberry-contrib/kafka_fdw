@@ -5,8 +5,8 @@ KAFKA_BIN_DIR=~/kafka
 : ${KAFKA_PRODUCER:="${KAFKA_BIN_DIR}/bin/kafka-console-producer.sh"}
 : ${KAFKA_TOPICS:="${KAFKA_BIN_DIR}/bin/kafka-topics.sh"}
 
-topics=( contrib_regress4 contrib_regress contrib_regress_prod contrib_regress_prod_json contrib_regress_junk contrib_regress_json contrib_regress_json_junk )
-partitions=( 4 1 4 4 1 1 1 )
+topics=( contrib_regress4 contrib_regress contrib_regress_prod contrib_regress_prod_json contrib_regress_junk contrib_regress_json contrib_regress_json_junk contrib_regress_cloudberry)
+partitions=( 4 1 4 4 1 1 1 3 )
 
 if [[ -n "${PG_CONFIG}" ]]; then
 	BIN=$(${PG_CONFIG} --bindir)
@@ -74,4 +74,8 @@ $kafka_cmd contrib_regress_json_junk <<-EOF
 {"int_val" : 999841, "text_val" : "empty time" , "date_val" : "2015-01-12", "time_val" : ""}
 {"int_val" : 999851, "text_val" : "correct line null time", "date_val" : "2015-01-12", "time_val" : null}
 {"int_val" : 999871, "invalid json no time" : "invalid json", "date_val" : "2015-01-12", "time_val" : }
+EOF
+
+$kafka_cmd contrib_regress_cloudberry <<-EOF
+{"int_val" : 8893920, "text_val" : "correct line", "date_val" : "2015-01-12", "time_val" : "2015-01-12T13:42:21"}
 EOF

@@ -1271,6 +1271,7 @@ kafkaBeginForeignModify(ModifyTableState *mtstate,
     Relation             rel           = rinfo->ri_RelationDesc;
     char                 errstr[512]; /* librdkafka API error reporting buffer */
     List                *attnumlist;
+	KafkaPartitionList	*partition_list;
 
     DEBUGLOG("%s", __func__);
 
@@ -1376,6 +1377,10 @@ kafkaBeginForeignModify(ModifyTableState *mtstate,
     festate->kafka_topic_handle = rkt;
     festate->kafka_handle       = rk;
 
+	partition_list = getPartitionList(festate->kafka_handle,
+									  festate->kafka_topic_handle);
+	festate->partition_cnt = partition_list->partition_cnt;
+
     rinfo->ri_FdwState = festate;
 }
 
@@ -1426,6 +1431,15 @@ kafkaExecForeignInsert(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *slo
     value = slot_getattr(slot, festate->kafka_options.partition_attnum, &isnull);
     if (!isnull)
         partition = DatumGetInt32(value);
+
+    if (!isnull && partition >= festate->partition_cnt)
+    {
+        ereport(ERROR, (errcode(ERRCODE_FDW_ERROR),
+                errmsg("invalid partition number %d", partition),
+                errdetail("Topic \"%s\" has only %d partitions (0-%d).",
+                          rd_kafka_topic_name(festate->kafka_topic_handle),
+                          festate->partition_cnt, festate->partition_cnt - 1)));
+    }
 
     DEBUGLOG("Message: %s", festate->attribute_buf.data);
 

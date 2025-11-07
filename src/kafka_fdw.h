@@ -246,7 +246,7 @@ typedef struct KafkaFdwModifyState
     List *               partition_list;     /* integer list of partitions */
     StringInfoData       attname_buf;        /* buffer holding attribute names for json format */
     char **              attnames;           /* pointer into attname_buf */
-
+    int32                partition_cnt;
 } KafkaFdwModifyState;
 /* connection.c */
 void KafkaFdwGetConnection(KafkaOptions *k_options,
