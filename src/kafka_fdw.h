@@ -159,6 +159,12 @@ typedef struct KafkaOptions
     bool  strict;            /* force strict parsing */
     bool  ignore_junk;       /* ignore junk data by setting it to null */
     int   num_parse_col;     /* number of parsable columns */
+	char *group_id;          /* consumer group id */
+	/* security options */
+	char *security_protocol;
+	char *sasl_mechanisms;
+	char *sasl_username;
+	char *sasl_password;
 } KafkaOptions;
 
 typedef struct ParseOptions

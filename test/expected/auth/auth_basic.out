@@ -1,0 +1,29 @@
+-- start_ignore
+drop server if exists kafka_auth_server cascade;
+NOTICE:  server "kafka_auth_server" does not exist, skipping
+-- end_ignore
+CREATE SERVER kafka_auth_server
+FOREIGN DATA WRAPPER kafka_fdw
+OPTIONS (mpp_execute 'all segments', brokers 'localhost:9092', security_protocol 'SASL_PLAINTEXT', sasl_mechanisms 'SCRAM-SHA-256', sasl_username 'broker', sasl_password 'broker-pass' );
+CREATE USER MAPPING FOR PUBLIC SERVER kafka_auth_server;
+CREATE FOREIGN TABLE auth_basic_tab1 (
+	part int OPTIONS (partition 'true'),
+	offs bigint OPTIONS (offset 'true'),
+	some_int int OPTIONS (json 'int_val'),
+	some_text text OPTIONS (json 'text_val'),
+	some_date date OPTIONS (json 'date_val'),
+	some_time timestamp OPTIONS (json 'time_val')
+)
+SERVER kafka_auth_server OPTIONS
+(format 'json', topic 'auth_basic', batch_size '30', buffer_delay '500');
+select * from auth_basic_tab1;
+ERROR:  Failed to acquire metadata: Local: Broker transport failure (kafka_expr.c:202)
+-- set right username and password
+alter server kafka_auth_server options (set sasl_username 'kafka_fdw_user');
+alter server kafka_auth_server options (set sasl_password 'kafka_fdw_pass');
+select * from auth_basic_tab1;
+ part | offs | some_int |  some_text   | some_date  |        some_time         
+------+------+----------+--------------+------------+--------------------------
+    0 |    0 |  8893920 | correct line | 01-12-2015 | Mon Jan 12 13:42:21 2015
+(1 row)
+
