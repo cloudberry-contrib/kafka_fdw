@@ -27,6 +27,10 @@ static const struct KafkaFdwOption valid_options[] = {
 
     /* Connection options */
     { "brokers", ForeignServerRelationId },
+    { "security_protocol", ForeignServerRelationId },
+    { "sasl_mechanisms", ForeignServerRelationId },
+    { "sasl_username", ForeignServerRelationId },
+    { "sasl_password", ForeignServerRelationId },
 
     /* table options */
     { "topic", ForeignTableRelationId },
@@ -35,6 +39,7 @@ static const struct KafkaFdwOption valid_options[] = {
     { "strict", ForeignTableRelationId },
     { "ignore_junk", ForeignTableRelationId },
     { "num_partitions", ForeignTableRelationId },
+    { "group_id", ForeignTableRelationId },
 
     /* Format options */
     /* oids option is not supported */
@@ -403,6 +408,26 @@ KafkaProcessKafkaOptions(Oid relid, KafkaOptions *kafka_options, List *options)
         {
             kafka_options->ignore_junk = defGetBoolean(def);
         }
+		else if (strcmp(def->defname, "group_id") == 0)
+		{
+			kafka_options->group_id = defGetString(def);
+		}
+		else if (strcmp(def->defname, "security_protocol") == 0)
+		{
+			kafka_options->security_protocol = defGetString(def);
+		}
+		else if (strcmp(def->defname, "sasl_mechanisms") == 0)
+		{
+			kafka_options->sasl_mechanisms = defGetString(def);
+		}
+		else if (strcmp(def->defname, "sasl_username") == 0)
+		{
+			kafka_options->sasl_username = defGetString(def);
+		}
+		else if (strcmp(def->defname, "sasl_password") == 0)
+		{
+			kafka_options->sasl_password = defGetString(def);
+		}
     }
 
     if (relid != InvalidOid)
