@@ -14,11 +14,47 @@ KafkaFdwGetConnection(KafkaOptions *k_options,
     if (k_options->brokers == NULL || k_options->topic == NULL)
         elog(ERROR, "brokers and topic need to be set ");
 
+	if (k_options->security_protocol != NULL
+		&& (k_options->sasl_mechanisms == NULL
+			|| k_options->sasl_username == NULL
+			|| k_options->sasl_password == NULL))
+	{
+		elog(ERROR, "sasl_mechanisms, sasl_username, and sasl_password must be set when security_protocol is set");
+	}
+
     conf = rd_kafka_conf_new();
 
     if (rd_kafka_conf_set(conf, "bootstrap.servers", k_options->brokers,
                           errstr, sizeof(errstr)) != RD_KAFKA_CONF_OK)
         elog(ERROR, "%s\n", errstr);
+
+	/* group id */
+	if (k_options->group_id != NULL)
+	{
+		if (rd_kafka_conf_set(conf, "group.id", k_options->group_id,
+								errstr, sizeof(errstr)) != RD_KAFKA_CONF_OK)
+			elog(ERROR, "%s\n", errstr);
+	}
+
+	/* security options */
+	if (k_options->security_protocol != NULL)
+	{
+		if (rd_kafka_conf_set(conf, "security.protocol", k_options->security_protocol,
+								errstr, sizeof(errstr)) != RD_KAFKA_CONF_OK)
+			elog(ERROR, "%s\n", errstr);
+
+		if (rd_kafka_conf_set(conf, "sasl.mechanisms", k_options->sasl_mechanisms,
+								errstr, sizeof(errstr)) != RD_KAFKA_CONF_OK)
+			elog(ERROR, "%s\n", errstr);
+
+		if (rd_kafka_conf_set(conf, "sasl.username", k_options->sasl_username,
+								errstr, sizeof(errstr)) != RD_KAFKA_CONF_OK)
+			elog(ERROR, "%s\n", errstr);
+
+		if (rd_kafka_conf_set(conf, "sasl.password", k_options->sasl_password,
+								errstr, sizeof(errstr)) != RD_KAFKA_CONF_OK)
+			elog(ERROR, "%s\n", errstr);
+	}
 
     *kafka_handle = rd_kafka_new(RD_KAFKA_CONSUMER, conf, errstr, KAFKA_MAX_ERR_MSG);
 

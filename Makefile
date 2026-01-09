@@ -52,3 +52,12 @@ prep_kafka:
 	./test/init_kafka.sh
 
 .PHONY:	prep_kafka
+
+TESTS_AUTH = $(wildcard test/sql/auth/*.sql)
+REGRESS_AUTH ?= $(patsubst test/sql/%.sql,%,$(TESTS_AUTH))
+REGRESS_OPTS_AUTH = --inputdir=test --load-extension=$(EXTENSION)
+
+installcheck-auth:
+	./test/run_kafka_auth.sh
+	./test/init_kafka_auth.sh
+	$(MAKE) NOINIT=1 REGRESS="$(REGRESS_AUTH)" REGRESS_OPTS="$(REGRESS_OPTS_AUTH)" installcheck
