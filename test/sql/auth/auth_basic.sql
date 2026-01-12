@@ -26,3 +26,10 @@ alter server kafka_auth_server options (set sasl_username 'kafka_fdw_user');
 alter server kafka_auth_server options (set sasl_password 'kafka_fdw_pass');
 
 select * from auth_basic_tab1;
+
+-- insert is also supported
+insert into auth_basic_tab1 (some_int, some_text, some_date, some_time) values
+(10, 'test1', '2024-01-01', '2024-01-01 10:00:00'),
+(20, 'test2', '2024-02-02', '2024-02-02 11:00:00');
+
+select count(*) from auth_basic_tab1;

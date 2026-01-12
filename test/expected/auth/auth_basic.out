@@ -27,3 +27,13 @@ select * from auth_basic_tab1;
     0 |    0 |  8893920 | correct line | 01-12-2015 | Mon Jan 12 13:42:21 2015
 (1 row)
 
+-- insert is also supported
+insert into auth_basic_tab1 (some_int, some_text, some_date, some_time) values
+(10, 'test1', '2024-01-01', '2024-01-01 10:00:00'),
+(20, 'test2', '2024-02-02', '2024-02-02 11:00:00');
+select count(*) from auth_basic_tab1;
+ count 
+-------
+     3
+(1 row)
+
