@@ -1354,6 +1354,34 @@ kafkaBeginForeignModify(ModifyTableState *mtstate,
     rd_kafka_conf_set(conf, "retry.backoff.ms", "500", NULL, 0);
     */
 
+	/* group id */
+	if (kafka_options.group_id != NULL)
+	{
+		if (rd_kafka_conf_set(conf, "group.id", kafka_options.group_id,
+								errstr, sizeof(errstr)) != RD_KAFKA_CONF_OK)
+			elog(ERROR, "%s\n", errstr);
+	}
+
+	/* security options */
+	if (kafka_options.security_protocol != NULL)
+	{
+		if (rd_kafka_conf_set(conf, "security.protocol", kafka_options.security_protocol,
+								errstr, sizeof(errstr)) != RD_KAFKA_CONF_OK)
+			elog(ERROR, "%s\n", errstr);
+
+		if (rd_kafka_conf_set(conf, "sasl.mechanisms", kafka_options.sasl_mechanisms,
+								errstr, sizeof(errstr)) != RD_KAFKA_CONF_OK)
+			elog(ERROR, "%s\n", errstr);
+
+		if (rd_kafka_conf_set(conf, "sasl.username", kafka_options.sasl_username,
+								errstr, sizeof(errstr)) != RD_KAFKA_CONF_OK)
+			elog(ERROR, "%s\n", errstr);
+
+		if (rd_kafka_conf_set(conf, "sasl.password", kafka_options.sasl_password,
+								errstr, sizeof(errstr)) != RD_KAFKA_CONF_OK)
+			elog(ERROR, "%s\n", errstr);
+	}
+
     /*
      * Create producer instance.
      *
