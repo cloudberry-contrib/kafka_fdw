@@ -844,6 +844,26 @@ kafkaIterateForeignScan(ForeignScanState *node)
     return slot;
 }
 
+static bytea *
+decode_message(char *payload)
+{
+	Datum		datum1;
+	Datum		datum2;
+	NameData	encoding;
+
+	namestrcpy(&encoding, "UTF8");
+
+	datum1 = DirectFunctionCall2(binary_decode,
+								 CStringGetTextDatum(payload),
+								 CStringGetTextDatum("hex"));
+
+	datum2 = DirectFunctionCall2(pg_convert_from,
+								 datum1,
+								 NameGetDatum(&encoding));
+
+	return DatumGetByteaP(datum2);
+}
+
 static void
 ReadKafkaMessage(Relation                rel,
                  KafkaFdwExecutionState *festate,
@@ -864,10 +884,23 @@ ReadKafkaMessage(Relation                rel,
     bool          error         = false;
     int           fldct, fldnum;
     ListCell *    cur;
+	bytea		*decmsg = NULL;
 
     // DEBUGLOG("message: %s", message->payload);
 
-    fldct = KafkaReadAttributes((char *) message->payload, message->len, festate, parse_options->format, &error);
+	// decode the message
+	if (kafka_options->hex_decode)
+	{
+		decmsg = decode_message((char *) message->payload);
+
+		DEBUGLOG("message after decode: (%s), len : (%d)", (char *) VARDATA_ANY(decmsg), VARSIZE_ANY_EXHDR(decmsg));
+
+		fldct = KafkaReadAttributes(VARDATA_ANY(decmsg), VARSIZE_ANY_EXHDR(decmsg), festate, parse_options->format, &error);
+	}
+	else
+	{
+    	fldct = KafkaReadAttributes((char *) message->payload, message->len, festate, parse_options->format, &error);
+	}
 
     /* unterminated quote, total junk */
     if (error && parse_options->format == CSV)

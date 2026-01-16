@@ -63,7 +63,7 @@
 
 #define DEFAULT_KAFKA_OPTIONS                                                                                          \
     .batch_size = 1000, .buffer_delay = 1000, .offset_attnum = -1, .partition_attnum = -1, .junk_attnum = -1,           \
-    .junk_error_attnum = -1, .strict = false, .num_parse_col = 0, .ignore_junk = false, .num_partitions = 10
+    .junk_error_attnum = -1, .strict = false, .num_parse_col = 0, .ignore_junk = false, .num_partitions = 10, .hex_decode = false
 
 #define parsable_attnum(_attn, _kop)                                                                                   \
     (_attn != _kop.junk_attnum && _attn != _kop.junk_error_attnum && _attn != _kop.partition_attnum &&                 \
@@ -160,6 +160,7 @@ typedef struct KafkaOptions
     bool  ignore_junk;       /* ignore junk data by setting it to null */
     int   num_parse_col;     /* number of parsable columns */
 	char *group_id;          /* consumer group id */
+	bool hex_decode;
 	/* security options */
 	char *security_protocol;
 	char *sasl_mechanisms;

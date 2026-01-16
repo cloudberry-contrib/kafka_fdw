@@ -21,10 +21,10 @@ ERROR:  Failed to acquire metadata: Local: Broker transport failure (kafka_expr.
 -- set right username and password
 alter server kafka_auth_server options (set sasl_username 'kafka_fdw_user');
 alter server kafka_auth_server options (set sasl_password 'kafka_fdw_pass');
-select * from auth_basic_tab1;
- part | offs | some_int |  some_text   | some_date  |        some_time         
-------+------+----------+--------------+------------+--------------------------
-    0 |    0 |  8893920 | correct line | 01-12-2015 | Mon Jan 12 13:42:21 2015
+select some_int, some_text, some_date, some_time from auth_basic_tab1;
+ some_int |  some_text   | some_date  |        some_time         
+----------+--------------+------------+--------------------------
+  8893920 | correct line | 01-12-2015 | Mon Jan 12 13:42:21 2015
 (1 row)
 
 -- insert is also supported

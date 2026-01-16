@@ -25,7 +25,7 @@ select * from auth_basic_tab1;
 alter server kafka_auth_server options (set sasl_username 'kafka_fdw_user');
 alter server kafka_auth_server options (set sasl_password 'kafka_fdw_pass');
 
-select * from auth_basic_tab1;
+select some_int, some_text, some_date, some_time from auth_basic_tab1;
 
 -- insert is also supported
 insert into auth_basic_tab1 (some_int, some_text, some_date, some_time) values

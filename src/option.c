@@ -40,6 +40,7 @@ static const struct KafkaFdwOption valid_options[] = {
     { "ignore_junk", ForeignTableRelationId },
     { "num_partitions", ForeignTableRelationId },
     { "group_id", ForeignTableRelationId },
+    { "hex_decode", ForeignTableRelationId },
 
     /* Format options */
     /* oids option is not supported */
@@ -408,6 +409,10 @@ KafkaProcessKafkaOptions(Oid relid, KafkaOptions *kafka_options, List *options)
         {
             kafka_options->ignore_junk = defGetBoolean(def);
         }
+		else if (strcmp(def->defname, "hex_decode") == 0)
+		{
+			kafka_options->hex_decode = defGetBoolean(def);
+		}
 		else if (strcmp(def->defname, "group_id") == 0)
 		{
 			kafka_options->group_id = defGetString(def);
