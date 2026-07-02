@@ -18,8 +18,12 @@ DIST=$(cat /etc/os-release | grep ^ID= | sed s/ID=//)
 echo
 
 # # Download Apache Kafka
+# downloads.apache.org only keeps the current releases; older versions are
+# moved to archive.apache.org. Try the live mirror first, then fall back to
+# the archive so the download keeps working as versions age out.
 if [ ! -f "${KAFKA_ARCHIVE}" ]; then
-    wget https://downloads.apache.org/kafka/${KAFKA_VERSION}/${KAFKA_ARCHIVE}
+    wget "https://downloads.apache.org/kafka/${KAFKA_VERSION}/${KAFKA_ARCHIVE}" || \
+    wget "https://archive.apache.org/dist/kafka/${KAFKA_VERSION}/${KAFKA_ARCHIVE}"
 fi
 tar -xzf ${KAFKA_ARCHIVE} -C ${KAFKA_BIN_DIR} --strip-components=1
 export PATH="${KAFKA_BIN_DIR}/bin/:$PATH"
