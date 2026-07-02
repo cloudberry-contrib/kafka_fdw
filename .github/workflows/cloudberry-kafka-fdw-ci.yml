@@ -1,0 +1,391 @@
+# --------------------------------------------------------------------
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements. See the NOTICE file distributed
+# with this work for additional information regarding copyright
+# ownership. The ASF licenses this file to You under the Apache
+# License, Version 2.0 (the "License"); you may not use this file
+# except in compliance with the License. You may obtain a copy of the
+# License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+# implied. See the License for the specific language governing
+# permissions and limitations under the License.
+#
+# --------------------------------------------------------------------
+# GitHub Actions Workflow: kafka_fdw for Apache Cloudberry CI
+# --------------------------------------------------------------------
+# Description:
+#
+#   Builds Apache Cloudberry from source (REL_2_STABLE), packages the
+#   installation, then builds and installs the kafka_fdw extension
+#   against a demo Cloudberry cluster and runs the extension's built-in
+#   regression tests against a live Kafka broker.
+#
+# Workflow Overview:
+# 1. Build Cloudberry from source and upload the installation + source
+#    as artifacts (so the test job does not rebuild Cloudberry).
+# 2. Restore the Cloudberry installation, create a demo cluster, start a
+#    local Kafka/ZooKeeper instance, build/install kafka_fdw, seed the
+#    test topics, and run `make installcheck`.
+#
+# Notes:
+# - The kafka_fdw regression suite is an integration test: it expects a
+#   Kafka broker reachable at localhost:9092 (see test/init_kafka.sh).
+# - The Cloudberry ORCA optimizer is disabled during installcheck so the
+#   plans match the extension's expected output files.
+# --------------------------------------------------------------------
+
+name: cloudberry-kafka-fdw-ci
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+    types: [ opened, synchronize, reopened, edited, ready_for_review ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CLOUDBERRY_REPO: apache/cloudberry
+  # Currently targeting REL_2_STABLE (2.x) branch only.
+  # TODO: Switch back to "main" once Cloudberry 3.x / main branch
+  # stabilizes with PG16 support.
+  CLOUDBERRY_REF: REL_2_STABLE
+  CLOUDBERRY_DIR: cloudberry
+  KAFKA_FDW_DIR: kafka_fdw
+
+jobs:
+  build_cloudberry:
+    name: Build Cloudberry From Source
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    container:
+      image: apache/incubator-cloudberry:cbdb-build-rocky9-latest
+      options: >-
+        --user root
+        -h cdw
+        -v /usr/share:/host_usr_share
+        -v /usr/local:/host_usr_local
+        -v /opt:/host_opt
+
+    steps:
+      - name: Free Disk Space
+        run: |
+          set -euo pipefail
+          echo "=== Disk space before cleanup ==="
+          df -h /
+
+          rm -rf /host_opt/hostedtoolcache || true
+          rm -rf /host_usr_local/lib/android || true
+          rm -rf /host_usr_share/dotnet || true
+          rm -rf /host_opt/ghc || true
+          rm -rf /host_usr_local/.ghcup || true
+          rm -rf /host_usr_share/swift || true
+          rm -rf /host_usr_local/share/powershell || true
+          rm -rf /host_usr_local/share/chromium || true
+          rm -rf /host_usr_share/miniconda || true
+          rm -rf /host_opt/az || true
+          rm -rf /host_usr_share/sbt || true
+
+          echo "=== Disk space after cleanup ==="
+          df -h /
+
+      - name: Checkout Cloudberry Source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.CLOUDBERRY_REPO }}
+          ref: ${{ env.CLOUDBERRY_REF }}
+          fetch-depth: 1
+          submodules: true
+          path: ${{ env.CLOUDBERRY_DIR }}
+
+      - name: Cloudberry Environment Initialization
+        env:
+          SRC_DIR: ${{ github.workspace }}/${{ env.CLOUDBERRY_DIR }}
+        run: |
+          set -euo pipefail
+          if ! su - gpadmin -c "/tmp/init_system.sh"; then
+            echo "::error::Container initialization failed"
+            exit 1
+          fi
+
+          mkdir -p "${SRC_DIR}/build-logs/details"
+          chown -R gpadmin:gpadmin .
+          chmod -R 755 .
+          chmod 777 "${SRC_DIR}/build-logs"
+          df -h /
+          rm -rf /__t/*
+          df -h /
+
+      - name: Configure Cloudberry
+        env:
+          SRC_DIR: ${{ github.workspace }}/${{ env.CLOUDBERRY_DIR }}
+        run: |
+          set -euo pipefail
+          chmod +x "${SRC_DIR}/devops/build/automation/cloudberry/scripts/configure-cloudberry.sh"
+          if ! time su - gpadmin -c "cd ${SRC_DIR} && SRC_DIR=${SRC_DIR} ${SRC_DIR}/devops/build/automation/cloudberry/scripts/configure-cloudberry.sh"; then
+            echo "::error::Configure script failed"
+            exit 1
+          fi
+
+      - name: Build Cloudberry
+        env:
+          SRC_DIR: ${{ github.workspace }}/${{ env.CLOUDBERRY_DIR }}
+        run: |
+          set -euo pipefail
+          chmod +x "${SRC_DIR}/devops/build/automation/cloudberry/scripts/build-cloudberry.sh"
+          if ! time su - gpadmin -c "cd ${SRC_DIR} && SRC_DIR=${SRC_DIR} ${SRC_DIR}/devops/build/automation/cloudberry/scripts/build-cloudberry.sh"; then
+            echo "::error::Build script failed"
+            exit 1
+          fi
+
+      - name: Package Cloudberry Source
+        env:
+          SRC_DIR: ${{ github.workspace }}/${{ env.CLOUDBERRY_DIR }}
+        run: |
+          set -euo pipefail
+          tar -C "${GITHUB_WORKSPACE}" -czf cloudberry-src.tgz "${CLOUDBERRY_DIR}"
+
+      - name: Package Cloudberry Installation
+        run: |
+          set -euo pipefail
+          tar -C /usr/local -czf cloudberry-db.tgz cloudberry-db
+
+      - name: Upload Cloudberry Installation
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudberry-db-install
+          path: cloudberry-db.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload Cloudberry Source
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudberry-source
+          path: cloudberry-src.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+  test_kafka_fdw:
+    name: kafka_fdw Tests on Cloudberry
+    needs: [build_cloudberry]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    container:
+      image: apache/incubator-cloudberry:cbdb-build-rocky9-latest
+      options: >-
+        --user root
+        -h cdw
+        -v /usr/share:/host_usr_share
+        -v /usr/local:/host_usr_local
+        -v /opt:/host_opt
+
+    steps:
+      - name: Free Disk Space
+        run: |
+          set -euo pipefail
+          echo "=== Disk space before cleanup ==="
+          df -h /
+
+          rm -rf /host_opt/hostedtoolcache || true
+          rm -rf /host_usr_local/lib/android || true
+          rm -rf /host_usr_share/dotnet || true
+          rm -rf /host_opt/ghc || true
+          rm -rf /host_usr_local/.ghcup || true
+          rm -rf /host_usr_share/swift || true
+          rm -rf /host_usr_local/share/powershell || true
+          rm -rf /host_usr_local/share/chromium || true
+          rm -rf /host_usr_share/miniconda || true
+          rm -rf /host_opt/az || true
+          rm -rf /host_usr_share/sbt || true
+
+          echo "=== Disk space after cleanup ==="
+          df -h /
+
+      - name: Checkout kafka_fdw
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          path: ${{ env.KAFKA_FDW_DIR }}
+
+      - name: Download Cloudberry Installation
+        uses: actions/download-artifact@v4
+        with:
+          name: cloudberry-db-install
+
+      - name: Download Cloudberry Source
+        uses: actions/download-artifact@v4
+        with:
+          name: cloudberry-source
+
+      - name: Restore Cloudberry Installation
+        run: |
+          set -euo pipefail
+          tar -C /usr/local -xzf cloudberry-db.tgz
+          # kafka_fdw is installed into $GPHOME as gpadmin, so make sure
+          # the installation tree is writable by that user.
+          chown -R gpadmin:gpadmin /usr/local/cloudberry-db
+
+      - name: Restore Cloudberry Source
+        run: |
+          set -euo pipefail
+          tar -C "${GITHUB_WORKSPACE}" -xzf cloudberry-src.tgz
+
+      - name: Cloudberry Environment Initialization
+        env:
+          SRC_DIR: ${{ github.workspace }}/${{ env.CLOUDBERRY_DIR }}
+        run: |
+          set -euo pipefail
+          if ! su - gpadmin -c "/tmp/init_system.sh"; then
+            echo "::error::Container initialization failed"
+            exit 1
+          fi
+
+          mkdir -p "${SRC_DIR}/build-logs/details"
+          chown -R gpadmin:gpadmin .
+          chmod -R 755 .
+          chmod 777 "${SRC_DIR}/build-logs"
+          df -h /
+          rm -rf /__t/*
+          df -h /
+
+      - name: Install kafka_fdw Build & Runtime Dependencies
+        run: |
+          set -euo pipefail
+          # librdkafka-devel lives in EPEL and needs the CRB repo enabled.
+          dnf install -y epel-release
+          dnf config-manager --set-enabled crb || \
+            dnf config-manager --set-enabled powertools || true
+          dnf install -y \
+            librdkafka-devel \
+            zlib-devel \
+            java-17-openjdk-headless \
+            wget \
+            tar
+          # kafka_fdw runs under gpadmin; give it access to the Kafka JRE.
+          java -version
+
+      - name: Create Cloudberry Demo Cluster
+        env:
+          SRC_DIR: ${{ github.workspace }}/${{ env.CLOUDBERRY_DIR }}
+        run: |
+          set -euo pipefail
+          chmod +x "${SRC_DIR}/devops/build/automation/cloudberry/scripts/create-cloudberry-demo-cluster.sh"
+          if ! time su - gpadmin -c "cd ${SRC_DIR} && SRC_DIR=${SRC_DIR} ${SRC_DIR}/devops/build/automation/cloudberry/scripts/create-cloudberry-demo-cluster.sh"; then
+            echo "::error::Demo cluster creation failed"
+            exit 1
+          fi
+
+      - name: Run kafka_fdw Regression Tests
+        env:
+          KAFKA_FDW_SRC: ${{ github.workspace }}/${{ env.KAFKA_FDW_DIR }}
+          CLOUDBERRY_SRC: ${{ github.workspace }}/${{ env.CLOUDBERRY_DIR }}
+        run: |
+          set -euo pipefail
+          TEST_LOG_ROOT="${GITHUB_WORKSPACE}/test-logs"
+          mkdir -p "${TEST_LOG_ROOT}"
+          chown -R gpadmin:gpadmin "${KAFKA_FDW_SRC}" "${TEST_LOG_ROOT}"
+
+          cat <<'SCRIPT' > /tmp/run_kafka_fdw_tests.sh
+          #!/bin/bash
+          set -euo pipefail
+
+          # Load Cloudberry runtime environment and demo cluster settings.
+          source /usr/local/cloudberry-db/cloudberry-env.sh
+          source ${CLOUDBERRY_SRC}/gpAux/gpdemo/gpdemo-env.sh
+
+          export PG_CONFIG="${GPHOME}/bin/pg_config"
+          # Disable ORCA so query plans match kafka_fdw's expected output.
+          export PGOPTIONS='-c optimizer=off'
+          # pg_regress / init_kafka.sh connect to the demo coordinator.
+          export PGDATABASE=postgres
+
+          echo "=== Using PG_CONFIG: ${PG_CONFIG} ==="
+          "${PG_CONFIG}" --version
+
+          pushd "${KAFKA_FDW_SRC}"
+            # 1. Build and install the extension into $GPHOME.
+            make PG_CONFIG="${PG_CONFIG}" USE_PGXS=1 \
+              2>&1 | tee "${TEST_LOG_ROOT}/kafka_fdw-build.log"
+            make install PG_CONFIG="${PG_CONFIG}" USE_PGXS=1 \
+              2>&1 | tee "${TEST_LOG_ROOT}/kafka_fdw-install.log"
+
+            # 2. Start a local Kafka + ZooKeeper instance.
+            ./test/run_kafka.sh 2>&1 | tee "${TEST_LOG_ROOT}/run_kafka.log"
+
+            # 3. Wait for the broker to accept connections.
+            echo "=== Waiting for Kafka broker on localhost:9092 ==="
+            broker_ready=0
+            for i in $(seq 1 60); do
+              if ~/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
+                broker_ready=1
+                echo "Kafka broker is ready (attempt ${i})"
+                break
+              fi
+              sleep 2
+            done
+            if [ "${broker_ready}" -ne 1 ]; then
+              echo "::error::Kafka broker did not become ready in time"
+              cat /tmp/kafka.log || true
+              cat /tmp/zookeeper.log || true
+              exit 1
+            fi
+
+            # 4. Create the test topics and seed message data.
+            ./test/init_kafka.sh 2>&1 | tee "${TEST_LOG_ROOT}/init_kafka.log"
+
+            # 5. Run the built-in regression suite. NOINIT=1 skips the
+            #    Makefile's prep_kafka target since we already started and
+            #    seeded Kafka above.
+            make NOINIT=1 installcheck PG_CONFIG="${PG_CONFIG}" USE_PGXS=1 \
+              2>&1 | tee "${TEST_LOG_ROOT}/kafka_fdw-installcheck.log"
+          popd
+          SCRIPT
+
+          chmod +x /tmp/run_kafka_fdw_tests.sh
+
+          set +e
+          su - gpadmin -c "KAFKA_FDW_SRC=${KAFKA_FDW_SRC} CLOUDBERRY_SRC=${CLOUDBERRY_SRC} TEST_LOG_ROOT=${TEST_LOG_ROOT} /tmp/run_kafka_fdw_tests.sh"
+          status=$?
+          set -e
+
+          # On failure, surface the regression diff for quick debugging.
+          if [ ${status} -ne 0 ] && [ -f "${KAFKA_FDW_SRC}/regression.diffs" ]; then
+            echo "=== regression.diffs ==="
+            cat "${KAFKA_FDW_SRC}/regression.diffs"
+            cp -a "${KAFKA_FDW_SRC}/regression.diffs" "${TEST_LOG_ROOT}/" || true
+          fi
+
+          {
+            echo "## kafka_fdw on Cloudberry Test Summary"
+            if [ ${status} -eq 0 ]; then
+              echo "- Result: PASS"
+            else
+              echo "- Result: FAIL"
+            fi
+            echo "- Logs: ${TEST_LOG_ROOT}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          exit ${status}
+
+      - name: Upload Test Logs (On Failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kafka-fdw-cloudberry-logs
+          path: test-logs
+          if-no-files-found: warn
+          retention-days: 7
