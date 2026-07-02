@@ -44,9 +44,9 @@ name: cloudberry-kafka-fdw-ci
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ main ]
     types: [ opened, synchronize, reopened, edited, ready_for_review ]
   workflow_dispatch:
 
