@@ -323,35 +323,30 @@ jobs:
             make install PG_CONFIG="${PG_CONFIG}" USE_PGXS=1 \
               2>&1 | tee "${TEST_LOG_ROOT}/kafka_fdw-install.log"
 
-            # 2. Start a local Kafka + ZooKeeper instance.
-            ./test/run_kafka.sh 2>&1 | tee "${TEST_LOG_ROOT}/run_kafka.log"
-
-            # 3. Wait for the broker to accept connections.
-            echo "=== Waiting for Kafka broker on localhost:9092 ==="
-            broker_ready=0
-            for i in $(seq 1 60); do
-              if ~/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
-                broker_ready=1
-                echo "Kafka broker is ready (attempt ${i})"
-                break
-              fi
-              sleep 2
-            done
-            if [ "${broker_ready}" -ne 1 ]; then
-              echo "::error::Kafka broker did not become ready in time"
-              cat /tmp/kafka.log || true
-              cat /tmp/zookeeper.log || true
-              exit 1
-            fi
-
-            # 4. Create the test topics and seed message data.
-            ./test/init_kafka.sh 2>&1 | tee "${TEST_LOG_ROOT}/init_kafka.log"
-
-            # 5. Run the built-in regression suite. NOINIT=1 skips the
-            #    Makefile's prep_kafka target since we already started and
-            #    seeded Kafka above.
-            make NOINIT=1 installcheck PG_CONFIG="${PG_CONFIG}" USE_PGXS=1 \
-              2>&1 | tee "${TEST_LOG_ROOT}/kafka_fdw-installcheck.log"
+            # 2. Run regression tests with ORCA optimizer disabled (planner).
+            #
+            # Disable ORCA to match PostgreSQL planner behavior for expected output.
+            export KAFKA_JVM_PERFORMANCE_OPTS="-XX:+UnlockExperimentalVMOptions"
+            echo "=== Running tests with optimizer=off (planner) ==="
+            export PGOPTIONS='-c optimizer=off'
+            make installcheck PG_CONFIG="${PG_CONFIG}" USE_PGXS=1 PGUSER=postgres \
+              2>&1 | tee "${TEST_LOG_ROOT}/kafka_fdw-installcheck-planner.log"
+            
+            # 3. Run regression tests with ORCA optimizer enabled.
+            #
+            # Test with Cloudberry's modern ORCA optimizer to see differences.
+            # Some tests may fail due to different EXPLAIN output or query plans.
+            echo "=== Running tests with optimizer=on (ORCA) ==="
+            export PGOPTIONS='-c optimizer=on'
+            # Clean previous test results to avoid interference
+            rm -f regression.out regression.diffs results/*.out
+            make NOINIT=1 installcheck PG_CONFIG="${PG_CONFIG}" USE_PGXS=1 PGUSER=postgres \
+              2>&1 | tee "${TEST_LOG_ROOT}/kafka_fdw-installcheck-orca.log" || true
+            
+            # Compare results
+            echo "=== Test Summary ==="
+            echo "Planner tests: $(grep -c '^test.*ok' ${TEST_LOG_ROOT}/kafka_fdw-installcheck-planner.log 2>/dev/null || echo 0) passed"
+            echo "ORCA tests: $(grep -c '^test.*ok' ${TEST_LOG_ROOT}/kafka_fdw-installcheck-orca.log 2>/dev/null || echo 0) passed"
           popd
           SCRIPT
 

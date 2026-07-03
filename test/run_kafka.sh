@@ -47,3 +47,20 @@ nohup zookeeper-server-start.sh ${KAFKA_BIN_DIR}/config/zookeeper.properties > /
 disown || true
 nohup kafka-server-start.sh ${KAFKA_BIN_DIR}/config/server.properties > /tmp/kafka.log 2>&1 < /dev/null &
 disown || true
+
+# Wait for Kafka broker to be ready before returning.
+# Without this, init_kafka.sh may try to create topics before the broker
+# is accepting connections, causing topic creation and data seeding to fail.
+echo "Waiting for Kafka broker to be ready on localhost:9092..."
+for i in $(seq 1 60); do
+  if ${KAFKA_BIN_DIR}/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
+    echo "Kafka broker is ready (attempt ${i})"
+    exit 0
+  fi
+  sleep 2
+done
+
+echo "ERROR: Kafka broker did not become ready in time" >&2
+cat /tmp/kafka.log || true
+cat /tmp/zookeeper.log || true
+exit 1
