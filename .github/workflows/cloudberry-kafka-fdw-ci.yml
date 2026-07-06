@@ -334,10 +334,11 @@ jobs:
             echo "Setting optimizer=off ensures tests use PostgreSQL planner to match expected output."
             
             export PGOPTIONS='-c optimizer=off'
+            set +e
             make installcheck PG_CONFIG="${PG_CONFIG}" USE_PGXS=1 PGUSER=gpadmin \
               2>&1 | tee "${TEST_LOG_ROOT}/kafka_fdw-installcheck-planner.log"
-            
             PLANNER_STATUS=$?
+            set -e
             echo "=== Planner test completed with status: ${PLANNER_STATUS} ==="
             
             # 3. Run regression tests with ORCA optimizer ENABLED.
