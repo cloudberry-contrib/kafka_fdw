@@ -103,8 +103,8 @@ SELECT COUNT(*) FROM kafka_test_prod WHERE offs >= 0 and part=2
 UNION ALL
 SELECT COUNT(*) FROM kafka_test_prod WHERE offs >= 0 and part=3
 )t;
- sum  
-------
+ sum 
+-----
  1010
 (1 row)
 

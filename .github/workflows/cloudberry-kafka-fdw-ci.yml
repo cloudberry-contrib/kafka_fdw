@@ -347,6 +347,12 @@ jobs:
             
             # Clean previous test results to avoid interference
             rm -f regression.out regression.diffs results/*.out 2>/dev/null || true
+
+            # Rebuild Kafka topics so ORCA tests start from a clean state.
+            # Without this, producer_test counts include data inserted by
+            # the planner run and produce false mismatches.
+            echo "=== Rebuilding Kafka topics for ORCA test run ==="
+            ./test/init_kafka.sh
             
             export PGOPTIONS='-c optimizer=on'
             make NOINIT=1 installcheck PG_CONFIG="${PG_CONFIG}" USE_PGXS=1 PGUSER=gpadmin \

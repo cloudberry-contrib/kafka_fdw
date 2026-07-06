@@ -17,17 +17,17 @@ DIST=$(cat /etc/os-release | grep ^ID= | sed s/ID=//)
 
 echo
 
-# # Download Apache Kafka
+# Download Apache Kafka
 # downloads.apache.org only keeps the current releases; older versions are
-# moved to archive.apache.org. Try the live mirror first, then fall back to
-# the archive so the download keeps working as versions age out.
+# moved to archive.apache.org. Try the archive first since pinned versions
+# (like 3.8.0) typically live there, then fall back to the live mirror.
 if [ ! -f "${KAFKA_ARCHIVE}" ]; then
     # Always write to the same target with -O so a partial/aborted first
     # attempt is overwritten rather than leaving a corrupt archive behind
     # (a plain retry would create ${KAFKA_ARCHIVE}.1 and tar would still
     # consume the broken first copy).
-    wget -O "${KAFKA_ARCHIVE}" "https://downloads.apache.org/kafka/${KAFKA_VERSION}/${KAFKA_ARCHIVE}" || \
-    wget -O "${KAFKA_ARCHIVE}" "https://archive.apache.org/dist/kafka/${KAFKA_VERSION}/${KAFKA_ARCHIVE}"
+    wget -O "${KAFKA_ARCHIVE}" "https://archive.apache.org/dist/kafka/${KAFKA_VERSION}/${KAFKA_ARCHIVE}" || \
+    wget -O "${KAFKA_ARCHIVE}" "https://downloads.apache.org/kafka/${KAFKA_VERSION}/${KAFKA_ARCHIVE}"
 fi
 tar -xzf ${KAFKA_ARCHIVE} -C ${KAFKA_BIN_DIR} --strip-components=1
 export PATH="${KAFKA_BIN_DIR}/bin/:$PATH"
