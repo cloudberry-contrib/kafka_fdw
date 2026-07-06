@@ -5,7 +5,7 @@ EXTVERSION   = $(shell grep default_version $(EXTENSION).control | sed -e "s/def
 DATA 		 = $(filter-out $(EXTENSION)--$(EXTVERSION).sql, $(wildcard *--*.sql)) $(EXTENSION)--$(EXTVERSION).sql
 # DOCS         = $(wildcard doc/*.md)
 TESTS        = $(wildcard test/sql/*.sql)
-REGRESS      ?= $(patsubst test/sql/%.sql,%,$(TESTS))
+REGRESS      ?= analyze_test cbdb_test error_test json_producer_test json_test strict_test junk_test kafka_test multiple_brokers parallel producer_test
 REGRESS_OPTS = --inputdir=test --load-extension=$(EXTENSION)
 EXTRA_CLEAN  = $(EXTENSION)--$(EXTVERSION).sql
 MODULE_big   = $(EXTENSION)

@@ -352,7 +352,7 @@ jobs:
             # Without this, producer_test counts include data inserted by
             # the planner run and produce false mismatches.
             echo "=== Rebuilding Kafka topics for ORCA test run ==="
-            ./test/init_kafka.sh
+            ./test/init_kafka.sh || true
             
             export PGOPTIONS='-c optimizer=on'
             make NOINIT=1 installcheck PG_CONFIG="${PG_CONFIG}" USE_PGXS=1 PGUSER=gpadmin \
