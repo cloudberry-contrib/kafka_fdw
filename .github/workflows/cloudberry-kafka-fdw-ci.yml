@@ -22,22 +22,25 @@
 # Description:
 #
 #   Builds Apache Cloudberry from source (REL_2_STABLE), packages the
-#   installation, then builds and installs the kafka_fdw extension
-#   against a demo Cloudberry cluster and runs the extension's built-in
-#   regression tests against a live Kafka broker.
+#   installation, then runs the kafka_fdw regression tests against
+#   a live Kafka broker in two parallel jobs:
+#
+#   1. Planner (optimizer=off) — matches expected output files.
+#   2. ORCA    (optimizer=on)  — Cloudberry's default optimizer.
+#
+#   A comparison job diff-s the two test results and reports
+#   ORCA-specific differences.
 #
 # Workflow Overview:
-# 1. Build Cloudberry from source and upload the installation + source
-#    as artifacts (so the test job does not rebuild Cloudberry).
-# 2. Restore the Cloudberry installation, create a demo cluster, start a
-#    local Kafka/ZooKeeper instance, build/install kafka_fdw, seed the
-#    test topics, and run `make installcheck`.
-#
-# Notes:
-# - The kafka_fdw regression suite is an integration test: it expects a
-#   Kafka broker reachable at localhost:9092 (see test/init_kafka.sh).
-# - The Cloudberry ORCA optimizer is disabled during installcheck so the
-#   plans match the extension's expected output files.
+#   build_cloudberry  ──────────────────────────────────────┐
+#       │                                                   │
+#       ├── test (Planner) ──┐                              │
+#       └── test (ORCA)    ──┤  (parallel, shared artifact) │
+#                             │                              │
+#                             ├── compare ───────────────────┘
+#                             │
+#                             ▼
+#                       CI status = planner pass/fail
 # --------------------------------------------------------------------
 
 name: cloudberry-kafka-fdw-ci
@@ -59,14 +62,16 @@ permissions:
 
 env:
   CLOUDBERRY_REPO: apache/cloudberry
-  # Currently targeting REL_2_STABLE (2.x) branch only.
-  # TODO: Switch back to "main" once Cloudberry 3.x / main branch
-  # stabilizes with PG16 support.
-  CLOUDBERRY_REF: REL_2_STABLE
-  CLOUDBERRY_DIR: cloudberry
-  KAFKA_FDW_DIR: kafka_fdw
+  CLOUDBERRY_REF:  REL_2_STABLE
+  CLOUDBERRY_DIR:  cloudberry
+  KAFKA_FDW_DIR:   kafka_fdw
+
+# ── Jobs ────────────────────────────────────────────────────────────
 
 jobs:
+  # ------------------------------------------------------------------
+  # Build Cloudberry from source once, then share via artifacts.
+  # ------------------------------------------------------------------
   build_cloudberry:
     name: Build Cloudberry From Source
     runs-on: ubuntu-22.04
@@ -86,7 +91,6 @@ jobs:
           set -euo pipefail
           echo "=== Disk space before cleanup ==="
           df -h /
-
           rm -rf /host_opt/hostedtoolcache || true
           rm -rf /host_usr_local/lib/android || true
           rm -rf /host_usr_share/dotnet || true
@@ -98,7 +102,6 @@ jobs:
           rm -rf /host_usr_share/miniconda || true
           rm -rf /host_opt/az || true
           rm -rf /host_usr_share/sbt || true
-
           echo "=== Disk space after cleanup ==="
           df -h /
 
@@ -106,10 +109,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ env.CLOUDBERRY_REPO }}
-          ref: ${{ env.CLOUDBERRY_REF }}
+          ref:        ${{ env.CLOUDBERRY_REF }}
           fetch-depth: 1
           submodules: true
-          path: ${{ env.CLOUDBERRY_DIR }}
+          path:       ${{ env.CLOUDBERRY_DIR }}
 
       - name: Cloudberry Environment Initialization
         env:
@@ -120,7 +123,6 @@ jobs:
             echo "::error::Container initialization failed"
             exit 1
           fi
-
           mkdir -p "${SRC_DIR}/build-logs/details"
           chown -R gpadmin:gpadmin .
           chmod -R 755 .
@@ -179,11 +181,22 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  test_kafka_fdw:
-    name: kafka_fdw Tests on Cloudberry
+  # ------------------------------------------------------------------
+  # Run regression tests in two parallel matrix jobs:
+  #   optimizer=off → PostgreSQL planner (matches expected output)
+  #   optimizer=on  → Cloudberry ORCA (default optimizer)
+  # Each job runs in its own container with its own Kafka instance,
+  # so there is zero cross-contamination between planner and ORCA runs.
+  # ------------------------------------------------------------------
+  test:
+    name: Test (${{ matrix.optimizer == 'off' && 'Planner' || 'ORCA' }})
     needs: [build_cloudberry]
     runs-on: ubuntu-22.04
     timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        optimizer: [off, on]
     container:
       image: apache/incubator-cloudberry:cbdb-build-rocky9-latest
       options: >-
@@ -199,7 +212,6 @@ jobs:
           set -euo pipefail
           echo "=== Disk space before cleanup ==="
           df -h /
-
           rm -rf /host_opt/hostedtoolcache || true
           rm -rf /host_usr_local/lib/android || true
           rm -rf /host_usr_share/dotnet || true
@@ -211,7 +223,6 @@ jobs:
           rm -rf /host_usr_share/miniconda || true
           rm -rf /host_opt/az || true
           rm -rf /host_usr_share/sbt || true
-
           echo "=== Disk space after cleanup ==="
           df -h /
 
@@ -235,8 +246,6 @@ jobs:
         run: |
           set -euo pipefail
           tar -C /usr/local -xzf cloudberry-db.tgz
-          # kafka_fdw is installed into $GPHOME as gpadmin, so make sure
-          # the installation tree is writable by that user.
           chown -R gpadmin:gpadmin /usr/local/cloudberry-db
 
       - name: Restore Cloudberry Source
@@ -253,7 +262,6 @@ jobs:
             echo "::error::Container initialization failed"
             exit 1
           fi
-
           mkdir -p "${SRC_DIR}/build-logs/details"
           chown -R gpadmin:gpadmin .
           chmod -R 755 .
@@ -265,7 +273,6 @@ jobs:
       - name: Install kafka_fdw Build & Runtime Dependencies
         run: |
           set -euo pipefail
-          # librdkafka-devel lives in EPEL and needs the CRB repo enabled.
           dnf install -y epel-release
           dnf config-manager --set-enabled crb || \
             dnf config-manager --set-enabled powertools || true
@@ -275,7 +282,6 @@ jobs:
             java-17-openjdk-headless \
             wget \
             tar
-          # kafka_fdw runs under gpadmin; give it access to the Kafka JRE.
           java -version
 
       - name: Create Cloudberry Demo Cluster
@@ -289,10 +295,12 @@ jobs:
             exit 1
           fi
 
-      - name: Run kafka_fdw Regression Tests with ORCA Comparison
+      - name: Run kafka_fdw Regression Tests
         env:
-          KAFKA_FDW_SRC: ${{ github.workspace }}/${{ env.KAFKA_FDW_DIR }}
-          CLOUDBERRY_SRC: ${{ github.workspace }}/${{ env.CLOUDBERRY_DIR }}
+          KAFKA_FDW_SRC:   ${{ github.workspace }}/${{ env.KAFKA_FDW_DIR }}
+          CLOUDBERRY_SRC:  ${{ github.workspace }}/${{ env.CLOUDBERRY_DIR }}
+          OPTIMIZER:       ${{ matrix.optimizer }}
+          OPTIMIZER_LABEL: ${{ matrix.optimizer == 'off' && 'planner' || 'orca' }}
         run: |
           set -euo pipefail
           TEST_LOG_ROOT="${GITHUB_WORKSPACE}/test-logs"
@@ -303,167 +311,97 @@ jobs:
           #!/bin/bash
           set -euo pipefail
 
-          # Load Cloudberry runtime environment and demo cluster settings.
           source /usr/local/cloudberry-db/cloudberry-env.sh
           source ${CLOUDBERRY_SRC}/gpAux/gpdemo/gpdemo-env.sh
 
           export PG_CONFIG="${GPHOME}/bin/pg_config"
           export PGDATABASE=postgres
-          # Use gpadmin user — Cloudberry's default superuser.
-          # pg_hba.conf only allows gpadmin via local socket by default.
           export PGUSER=gpadmin
           export KAFKA_JVM_PERFORMANCE_OPTS="-XX:+UnlockExperimentalVMOptions"
 
-          echo "=== Using PG_CONFIG: ${PG_CONFIG} ==="
+          echo "=== Optimizer mode: ${OPTIMIZER} (${OPTIMIZER_LABEL}) ==="
           "${PG_CONFIG}" --version
 
-          # Ensure 'gpadmin' database exists for default connections.
           createdb gpadmin >/dev/null 2>&1 || true
 
           pushd "${KAFKA_FDW_SRC}"
-            # 1. Build and install the extension into $GPHOME.
+            # Build and install
             make PG_CONFIG="${PG_CONFIG}" USE_PGXS=1 \
               2>&1 | tee "${TEST_LOG_ROOT}/kafka_fdw-build.log"
             make install PG_CONFIG="${PG_CONFIG}" USE_PGXS=1 \
               2>&1 | tee "${TEST_LOG_ROOT}/kafka_fdw-install.log"
 
-            # 2. Run regression tests with ORCA optimizer DISABLED (PostgreSQL planner).
-            echo "=== Running tests with optimizer=off (PostgreSQL planner) ==="
-            echo "Why optimizer=off: kafka_fdw expected output files were generated with PostgreSQL planner."
-            echo "Cloudberry's ORCA optimizer produces different EXPLAIN output and query plans."
-            echo "Setting optimizer=off ensures tests use PostgreSQL planner to match expected output."
-            
-            export PGOPTIONS='-c optimizer=off'
+            export PGOPTIONS="-c optimizer=${OPTIMIZER}"
             set +e
             make installcheck PG_CONFIG="${PG_CONFIG}" USE_PGXS=1 PGUSER=gpadmin \
-              2>&1 | tee "${TEST_LOG_ROOT}/kafka_fdw-installcheck-planner.log"
-            PLANNER_STATUS=$?
+              2>&1 | tee "${TEST_LOG_ROOT}/kafka_fdw-installcheck-${OPTIMIZER_LABEL}.log"
+            TEST_STATUS=$?
             set -e
-            echo "=== Planner test completed with status: ${PLANNER_STATUS} ==="
-            
-            # 3. Run regression tests with ORCA optimizer ENABLED.
-            echo "=== Running tests with optimizer=on (Cloudberry ORCA optimizer) ==="
-            echo "Why optimizer=on: Testing with Cloudberry's modern ORCA optimizer to see differences."
-            echo "Some tests may fail due to different EXPLAIN output or query plans."
-            
-            # Clean previous test results to avoid interference
-            rm -f regression.out regression.diffs results/*.out 2>/dev/null || true
 
-            # Rebuild Kafka topics so ORCA tests start from a clean state.
-            # Without this, producer_test counts include data inserted by
-            # the planner run and produce false mismatches.
-            echo "=== Rebuilding Kafka topics for ORCA test run ==="
-            ./test/init_kafka.sh || true
-            
-            export PGOPTIONS='-c optimizer=on'
-            make NOINIT=1 installcheck PG_CONFIG="${PG_CONFIG}" USE_PGXS=1 PGUSER=gpadmin \
-              2>&1 | tee "${TEST_LOG_ROOT}/kafka_fdw-installcheck-orca.log" || true
-            
-            ORCA_STATUS=$?
-            echo "=== ORCA test completed with status: ${ORCA_STATUS} ==="
-            
-            # Analyze and compare results
-            echo "=== ORCA vs Planner Test Analysis ==="
-            
-            # Extract test results from logs
-            planner_passed=$(grep -c '^test.*ok' "${TEST_LOG_ROOT}/kafka_fdw-installcheck-planner.log" 2>/dev/null || echo 0)
-            orca_passed=$(grep -c '^test.*ok' "${TEST_LOG_ROOT}/kafka_fdw-installcheck-orca.log" 2>/dev/null || echo 0)
-            
-            planner_failed=$(grep -c '^test.*FAILED' "${TEST_LOG_ROOT}/kafka_fdw-installcheck-planner.log" 2>/dev/null || echo 0)
-            orca_failed=$(grep -c '^test.*FAILED' "${TEST_LOG_ROOT}/kafka_fdw-installcheck-orca.log" 2>/dev/null || echo 0)
-            
-            echo "Planner (optimizer=off): ${planner_passed} passed, ${planner_failed} failed"
-            echo "ORCA   (optimizer=on):   ${orca_passed} passed, ${orca_failed} failed"
-            
-            # List specific test differences if any
-            if [ ${planner_failed} -ne ${orca_failed} ] || [ ${planner_failed} -gt 0 ] || [ ${orca_failed} -gt 0 ]; then
-              echo ""
-              echo "=== Detailed Test Comparison ==="
-              
-              # Extract test names
-              planner_tests=$(grep '^test.*\(ok\|FAILED\)' "${TEST_LOG_ROOT}/kafka_fdw-installcheck-planner.log" 2>/dev/null | sed 's/^test //' | sed 's/\.\.\. .*//' | sort || true)
-              orca_tests=$(grep '^test.*\(ok\|FAILED\)' "${TEST_LOG_ROOT}/kafka_fdw-installcheck-orca.log" 2>/dev/null | sed 's/^test //' | sed 's/\.\.\. .*//' | sort || true)
-              
-              # Identify tests that pass with planner but fail with ORCA
-              echo "Tests that pass with planner but fail with ORCA:"
-              for test in $planner_tests; do
-                if echo "$orca_tests" | grep -q "^$test$"; then
-                  planner_status=$(grep "^test ${test}" "${TEST_LOG_ROOT}/kafka_fdw-installcheck-planner.log" | grep -q "ok" && echo "PASS" || echo "FAIL")
-                  orca_status=$(grep "^test ${test}" "${TEST_LOG_ROOT}/kafka_fdw-installcheck-orca.log" | grep -q "ok" && echo "PASS" || echo "FAIL")
-                  
-                  if [ "$planner_status" = "PASS" ] && [ "$orca_status" = "FAIL" ]; then
-                    echo "  - ${test}: Planner=PASS, ORCA=FAIL"
-                  fi
-                fi
-              done
-              
-              echo ""
-              echo "Tests that fail with planner but pass with ORCA:"
-              for test in $planner_tests; do
-                if echo "$orca_tests" | grep -q "^$test$"; then
-                  planner_status=$(grep "^test ${test}" "${TEST_LOG_ROOT}/kafka_fdw-installcheck-planner.log" | grep -q "ok" && echo "PASS" || echo "FAIL")
-                  orca_status=$(grep "^test ${test}" "${TEST_LOG_ROOT}/kafka_fdw-installcheck-orca.log" | grep -q "ok" && echo "PASS" || echo "FAIL")
-                  
-                  if [ "$planner_status" = "FAIL" ] && [ "$orca_status" = "PASS" ]; then
-                    echo "  - ${test}: Planner=FAIL, ORCA=PASS"
-                  fi
-                fi
-              done
+            echo "=== Test completed with status: ${TEST_STATUS} ==="
+
+            if [ -f regression.diffs ]; then
+              cp -a regression.diffs "${TEST_LOG_ROOT}/${OPTIMIZER_LABEL}-regression.diffs"
             fi
-            
-            # Determine overall CI status
-            # CI should fail only if planner tests fail (since expected output matches planner)
-            if [ ${PLANNER_STATUS} -ne 0 ]; then
-              echo "=== CI STATUS: FAILED (Planner tests failed) ==="
-              exit 1
-            elif [ ${orca_failed} -gt 0 ]; then
-              echo "=== CI STATUS: PASSED (Planner tests passed, ORCA tests have ${orca_failed} failures - expected for EXPLAIN output differences) ==="
-              exit 0
-            else
-              echo "=== CI STATUS: PASSED (Both planner and ORCA tests passed) ==="
-              exit 0
+
+            # Summary
+            passed=$(grep -c '^test.*ok' "${TEST_LOG_ROOT}/kafka_fdw-installcheck-${OPTIMIZER_LABEL}.log" 2>/dev/null || echo 0)
+            failed=$(grep -c '^test.*FAILED' "${TEST_LOG_ROOT}/kafka_fdw-installcheck-${OPTIMIZER_LABEL}.log" 2>/dev/null || echo 0)
+            echo "${OPTIMIZER_LABEL} (optimizer=${OPTIMIZER}): ${passed} passed, ${failed} failed"
+
+            if [ ${TEST_STATUS} -ne 0 ]; then
+              echo "=== ${OPTIMIZER_LABEL} diffs ==="
+              cat regression.diffs 2>/dev/null || true
             fi
+
+            exit ${TEST_STATUS}
           popd
           SCRIPT
 
           chmod +x /tmp/run_kafka_fdw_tests.sh
 
           set +e
-          su - gpadmin -c "KAFKA_FDW_SRC=${KAFKA_FDW_SRC} CLOUDBERRY_SRC=${CLOUDBERRY_SRC} TEST_LOG_ROOT=${TEST_LOG_ROOT} /tmp/run_kafka_fdw_tests.sh"
+          su - gpadmin -c "KAFKA_FDW_SRC=${KAFKA_FDW_SRC} CLOUDBERRY_SRC=${CLOUDBERRY_SRC} TEST_LOG_ROOT=${TEST_LOG_ROOT} OPTIMIZER=${OPTIMIZER} OPTIMIZER_LABEL=${OPTIMIZER_LABEL} /tmp/run_kafka_fdw_tests.sh"
           status=$?
           set -e
 
-          # Always capture regression diffs for analysis
+          # Always capture diffs for the step summary
           if [ -f "${KAFKA_FDW_SRC}/regression.diffs" ]; then
             echo "=== regression.diffs ==="
             cat "${KAFKA_FDW_SRC}/regression.diffs"
-            cp -a "${KAFKA_FDW_SRC}/regression.diffs" "${TEST_LOG_ROOT}/" || true
           fi
 
           {
-            echo "## kafka_fdw on Cloudberry Test Summary"
-            echo "- Planner (optimizer=off): $(grep -c '^test.*ok' ${TEST_LOG_ROOT}/kafka_fdw-installcheck-planner.log 2>/dev/null || echo 0) passed"
-            echo "- ORCA (optimizer=on): $(grep -c '^test.*ok' ${TEST_LOG_ROOT}/kafka_fdw-installcheck-orca.log 2>/dev/null || echo 0) passed"
+            echo "## ${OPTIMIZER_LABEL} Test Summary"
+            echo "- Mode: optimizer=${OPTIMIZER}"
+            passed=$(grep -c '^test.*ok' "${TEST_LOG_ROOT}/kafka_fdw-installcheck-${OPTIMIZER_LABEL}.log" 2>/dev/null || echo 0)
+            failed=$(grep -c '^test.*FAILED' "${TEST_LOG_ROOT}/kafka_fdw-installcheck-${OPTIMIZER_LABEL}.log" 2>/dev/null || echo 0)
+            echo "- ${passed} passed, ${failed} failed"
             if [ ${status} -eq 0 ]; then
-              echo "- Overall Result: PASS"
+              echo "- Result: PASS"
             else
-              echo "- Overall Result: FAIL"
+              echo "- Result: FAIL"
             fi
-            echo "- Logs: ${TEST_LOG_ROOT}"
-            echo ""
-            echo "### ORCA vs Planner Analysis"
-            echo "The CI compares PostgreSQL planner (optimizer=off) vs Cloudberry ORCA (optimizer=on)."
-            echo "Expected output files match PostgreSQL planner behavior."
-            echo "Some EXPLAIN differences with ORCA are expected and may require separate expected output files."
           } >> "$GITHUB_STEP_SUMMARY"
 
           exit ${status}
 
-      - name: Upload Test Logs (On Failure)
-        if: failure()
+      - name: Upload Test Logs
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: kafka-fdw-cloudberry-logs
+          name: test-logs-${{ matrix.optimizer == 'off' && 'planner' || 'orca' }}
           path: test-logs
           if-no-files-found: warn
           retention-days: 7
+
+      - name: Mark CI Status
+        if: matrix.optimizer == 'off'
+        run: |
+          passed=$(grep -c '^test.*ok' "${GITHUB_WORKSPACE}/test-logs/kafka_fdw-installcheck-planner.log" 2>/dev/null || echo 0)
+          failed=$(grep -c '^test.*FAILED' "${GITHUB_WORKSPACE}/test-logs/kafka_fdw-installcheck-planner.log" 2>/dev/null || echo 0)
+          echo "Planner result: ${passed} passed, ${failed} failed"
+          if [ "${failed}" -gt 0 ]; then
+            echo "::error::${failed} planner test(s) failed"
+            exit 1
+          fi
