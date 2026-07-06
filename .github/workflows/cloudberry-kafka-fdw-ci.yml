@@ -289,7 +289,7 @@ jobs:
             exit 1
           fi
 
-      - name: Run kafka_fdw Regression Tests
+      - name: Run kafka_fdw Regression Tests with ORCA Comparison
         env:
           KAFKA_FDW_SRC: ${{ github.workspace }}/${{ env.KAFKA_FDW_DIR }}
           CLOUDBERRY_SRC: ${{ github.workspace }}/${{ env.CLOUDBERRY_DIR }}
@@ -308,13 +308,17 @@ jobs:
           source ${CLOUDBERRY_SRC}/gpAux/gpdemo/gpdemo-env.sh
 
           export PG_CONFIG="${GPHOME}/bin/pg_config"
-          # Disable ORCA so query plans match kafka_fdw's expected output.
-          export PGOPTIONS='-c optimizer=off'
-          # pg_regress / init_kafka.sh connect to the demo coordinator.
           export PGDATABASE=postgres
+          # Use gpadmin user — Cloudberry's default superuser.
+          # pg_hba.conf only allows gpadmin via local socket by default.
+          export PGUSER=gpadmin
+          export KAFKA_JVM_PERFORMANCE_OPTS="-XX:+UnlockExperimentalVMOptions"
 
           echo "=== Using PG_CONFIG: ${PG_CONFIG} ==="
           "${PG_CONFIG}" --version
+
+          # Ensure 'gpadmin' database exists for default connections.
+          createdb gpadmin >/dev/null 2>&1 || true
 
           pushd "${KAFKA_FDW_SRC}"
             # 1. Build and install the extension into $GPHOME.
@@ -323,30 +327,95 @@ jobs:
             make install PG_CONFIG="${PG_CONFIG}" USE_PGXS=1 \
               2>&1 | tee "${TEST_LOG_ROOT}/kafka_fdw-install.log"
 
-            # 2. Run regression tests with ORCA optimizer disabled (planner).
-            #
-            # Disable ORCA to match PostgreSQL planner behavior for expected output.
-            export KAFKA_JVM_PERFORMANCE_OPTS="-XX:+UnlockExperimentalVMOptions"
-            echo "=== Running tests with optimizer=off (planner) ==="
+            # 2. Run regression tests with ORCA optimizer DISABLED (PostgreSQL planner).
+            echo "=== Running tests with optimizer=off (PostgreSQL planner) ==="
+            echo "Why optimizer=off: kafka_fdw expected output files were generated with PostgreSQL planner."
+            echo "Cloudberry's ORCA optimizer produces different EXPLAIN output and query plans."
+            echo "Setting optimizer=off ensures tests use PostgreSQL planner to match expected output."
+            
             export PGOPTIONS='-c optimizer=off'
-            make installcheck PG_CONFIG="${PG_CONFIG}" USE_PGXS=1 PGUSER=postgres \
+            make installcheck PG_CONFIG="${PG_CONFIG}" USE_PGXS=1 PGUSER=gpadmin \
               2>&1 | tee "${TEST_LOG_ROOT}/kafka_fdw-installcheck-planner.log"
             
-            # 3. Run regression tests with ORCA optimizer enabled.
-            #
-            # Test with Cloudberry's modern ORCA optimizer to see differences.
-            # Some tests may fail due to different EXPLAIN output or query plans.
-            echo "=== Running tests with optimizer=on (ORCA) ==="
-            export PGOPTIONS='-c optimizer=on'
+            PLANNER_STATUS=$?
+            echo "=== Planner test completed with status: ${PLANNER_STATUS} ==="
+            
+            # 3. Run regression tests with ORCA optimizer ENABLED.
+            echo "=== Running tests with optimizer=on (Cloudberry ORCA optimizer) ==="
+            echo "Why optimizer=on: Testing with Cloudberry's modern ORCA optimizer to see differences."
+            echo "Some tests may fail due to different EXPLAIN output or query plans."
+            
             # Clean previous test results to avoid interference
-            rm -f regression.out regression.diffs results/*.out
-            make NOINIT=1 installcheck PG_CONFIG="${PG_CONFIG}" USE_PGXS=1 PGUSER=postgres \
+            rm -f regression.out regression.diffs results/*.out 2>/dev/null || true
+            
+            export PGOPTIONS='-c optimizer=on'
+            make NOINIT=1 installcheck PG_CONFIG="${PG_CONFIG}" USE_PGXS=1 PGUSER=gpadmin \
               2>&1 | tee "${TEST_LOG_ROOT}/kafka_fdw-installcheck-orca.log" || true
             
-            # Compare results
-            echo "=== Test Summary ==="
-            echo "Planner tests: $(grep -c '^test.*ok' ${TEST_LOG_ROOT}/kafka_fdw-installcheck-planner.log 2>/dev/null || echo 0) passed"
-            echo "ORCA tests: $(grep -c '^test.*ok' ${TEST_LOG_ROOT}/kafka_fdw-installcheck-orca.log 2>/dev/null || echo 0) passed"
+            ORCA_STATUS=$?
+            echo "=== ORCA test completed with status: ${ORCA_STATUS} ==="
+            
+            # Analyze and compare results
+            echo "=== ORCA vs Planner Test Analysis ==="
+            
+            # Extract test results from logs
+            planner_passed=$(grep -c '^test.*ok' "${TEST_LOG_ROOT}/kafka_fdw-installcheck-planner.log" 2>/dev/null || echo 0)
+            orca_passed=$(grep -c '^test.*ok' "${TEST_LOG_ROOT}/kafka_fdw-installcheck-orca.log" 2>/dev/null || echo 0)
+            
+            planner_failed=$(grep -c '^test.*FAILED' "${TEST_LOG_ROOT}/kafka_fdw-installcheck-planner.log" 2>/dev/null || echo 0)
+            orca_failed=$(grep -c '^test.*FAILED' "${TEST_LOG_ROOT}/kafka_fdw-installcheck-orca.log" 2>/dev/null || echo 0)
+            
+            echo "Planner (optimizer=off): ${planner_passed} passed, ${planner_failed} failed"
+            echo "ORCA   (optimizer=on):   ${orca_passed} passed, ${orca_failed} failed"
+            
+            # List specific test differences if any
+            if [ ${planner_failed} -ne ${orca_failed} ] || [ ${planner_failed} -gt 0 ] || [ ${orca_failed} -gt 0 ]; then
+              echo ""
+              echo "=== Detailed Test Comparison ==="
+              
+              # Extract test names
+              planner_tests=$(grep '^test.*\(ok\|FAILED\)' "${TEST_LOG_ROOT}/kafka_fdw-installcheck-planner.log" 2>/dev/null | sed 's/^test //' | sed 's/\.\.\. .*//' | sort || true)
+              orca_tests=$(grep '^test.*\(ok\|FAILED\)' "${TEST_LOG_ROOT}/kafka_fdw-installcheck-orca.log" 2>/dev/null | sed 's/^test //' | sed 's/\.\.\. .*//' | sort || true)
+              
+              # Identify tests that pass with planner but fail with ORCA
+              echo "Tests that pass with planner but fail with ORCA:"
+              for test in $planner_tests; do
+                if echo "$orca_tests" | grep -q "^$test$"; then
+                  planner_status=$(grep "^test ${test}" "${TEST_LOG_ROOT}/kafka_fdw-installcheck-planner.log" | grep -q "ok" && echo "PASS" || echo "FAIL")
+                  orca_status=$(grep "^test ${test}" "${TEST_LOG_ROOT}/kafka_fdw-installcheck-orca.log" | grep -q "ok" && echo "PASS" || echo "FAIL")
+                  
+                  if [ "$planner_status" = "PASS" ] && [ "$orca_status" = "FAIL" ]; then
+                    echo "  - ${test}: Planner=PASS, ORCA=FAIL"
+                  fi
+                fi
+              done
+              
+              echo ""
+              echo "Tests that fail with planner but pass with ORCA:"
+              for test in $planner_tests; do
+                if echo "$orca_tests" | grep -q "^$test$"; then
+                  planner_status=$(grep "^test ${test}" "${TEST_LOG_ROOT}/kafka_fdw-installcheck-planner.log" | grep -q "ok" && echo "PASS" || echo "FAIL")
+                  orca_status=$(grep "^test ${test}" "${TEST_LOG_ROOT}/kafka_fdw-installcheck-orca.log" | grep -q "ok" && echo "PASS" || echo "FAIL")
+                  
+                  if [ "$planner_status" = "FAIL" ] && [ "$orca_status" = "PASS" ]; then
+                    echo "  - ${test}: Planner=FAIL, ORCA=PASS"
+                  fi
+                fi
+              done
+            fi
+            
+            # Determine overall CI status
+            # CI should fail only if planner tests fail (since expected output matches planner)
+            if [ ${PLANNER_STATUS} -ne 0 ]; then
+              echo "=== CI STATUS: FAILED (Planner tests failed) ==="
+              exit 1
+            elif [ ${orca_failed} -gt 0 ]; then
+              echo "=== CI STATUS: PASSED (Planner tests passed, ORCA tests have ${orca_failed} failures - expected for EXPLAIN output differences) ==="
+              exit 0
+            else
+              echo "=== CI STATUS: PASSED (Both planner and ORCA tests passed) ==="
+              exit 0
+            fi
           popd
           SCRIPT
 
@@ -357,8 +426,8 @@ jobs:
           status=$?
           set -e
 
-          # On failure, surface the regression diff for quick debugging.
-          if [ ${status} -ne 0 ] && [ -f "${KAFKA_FDW_SRC}/regression.diffs" ]; then
+          # Always capture regression diffs for analysis
+          if [ -f "${KAFKA_FDW_SRC}/regression.diffs" ]; then
             echo "=== regression.diffs ==="
             cat "${KAFKA_FDW_SRC}/regression.diffs"
             cp -a "${KAFKA_FDW_SRC}/regression.diffs" "${TEST_LOG_ROOT}/" || true
@@ -366,12 +435,19 @@ jobs:
 
           {
             echo "## kafka_fdw on Cloudberry Test Summary"
+            echo "- Planner (optimizer=off): $(grep -c '^test.*ok' ${TEST_LOG_ROOT}/kafka_fdw-installcheck-planner.log 2>/dev/null || echo 0) passed"
+            echo "- ORCA (optimizer=on): $(grep -c '^test.*ok' ${TEST_LOG_ROOT}/kafka_fdw-installcheck-orca.log 2>/dev/null || echo 0) passed"
             if [ ${status} -eq 0 ]; then
-              echo "- Result: PASS"
+              echo "- Overall Result: PASS"
             else
-              echo "- Result: FAIL"
+              echo "- Overall Result: FAIL"
             fi
             echo "- Logs: ${TEST_LOG_ROOT}"
+            echo ""
+            echo "### ORCA vs Planner Analysis"
+            echo "The CI compares PostgreSQL planner (optimizer=off) vs Cloudberry ORCA (optimizer=on)."
+            echo "Expected output files match PostgreSQL planner behavior."
+            echo "Some EXPLAIN differences with ORCA are expected and may require separate expected output files."
           } >> "$GITHUB_STEP_SUMMARY"
 
           exit ${status}
