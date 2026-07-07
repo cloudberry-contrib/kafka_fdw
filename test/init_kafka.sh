@@ -33,8 +33,8 @@ json_junk_topic="contrib_regress_json_junk"
 out_sql="SELECT i as int_val, 'It''s some text, that is for number '||i as text_val, ('2015-01-01'::date + (i || ' seconds')::interval)::date as date_val, ('2015-01-01'::date + (i || ' seconds')::interval)::timestamp as time_val FROM generate_series(1,1e6::int, 10) i ORDER BY i"
 kafka_cmd="$KAFKA_PRODUCER --bootstrap-server localhost:9092 --topic"
 
-# delete topic if it might exist
-for t in "${topics[@]}"; do $KAFKA_TOPICS --bootstrap-server localhost:9092 --delete --topic ${t} & done; wait
+# delete topic if it might exist (suppress stderr: Kafka 3.x prints noisy Optional[...] wrapper for missing topics)
+for t in "${topics[@]}"; do $KAFKA_TOPICS --bootstrap-server localhost:9092 --delete --topic ${t} 2>/dev/null & done; wait
 
 
 # create topics with partitions
@@ -75,6 +75,9 @@ $kafka_cmd contrib_regress_json_junk <<-EOF
 {"int_val" : 999851, "text_val" : "correct line null time", "date_val" : "2015-01-12", "time_val" : null}
 {"int_val" : 999871, "invalid json no time" : "invalid json", "date_val" : "2015-01-12", "time_val" : }
 EOF
+
+# Wait for all background producers to finish before exiting.
+wait
 
 $kafka_cmd contrib_regress_cloudberry <<-EOF
 {"int_val" : 8893920, "text_val" : "correct line", "date_val" : "2015-01-12", "time_val" : "2015-01-12T13:42:21"}

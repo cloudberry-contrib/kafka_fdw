@@ -17,9 +17,17 @@ DIST=$(cat /etc/os-release | grep ^ID= | sed s/ID=//)
 
 echo
 
-# # Download Apache Kafka
+# Download Apache Kafka
+# downloads.apache.org only keeps the current releases; older versions are
+# moved to archive.apache.org. Try the archive first since pinned versions
+# (like 3.8.0) typically live there, then fall back to the live mirror.
 if [ ! -f "${KAFKA_ARCHIVE}" ]; then
-    wget https://downloads.apache.org/kafka/${KAFKA_VERSION}/${KAFKA_ARCHIVE}
+    # Always write to the same target with -O so a partial/aborted first
+    # attempt is overwritten rather than leaving a corrupt archive behind
+    # (a plain retry would create ${KAFKA_ARCHIVE}.1 and tar would still
+    # consume the broken first copy).
+    wget -nv -O "${KAFKA_ARCHIVE}" "https://archive.apache.org/dist/kafka/${KAFKA_VERSION}/${KAFKA_ARCHIVE}" || \
+    wget -nv -O "${KAFKA_ARCHIVE}" "https://downloads.apache.org/kafka/${KAFKA_VERSION}/${KAFKA_ARCHIVE}"
 fi
 tar -xzf ${KAFKA_ARCHIVE} -C ${KAFKA_BIN_DIR} --strip-components=1
 export PATH="${KAFKA_BIN_DIR}/bin/:$PATH"
@@ -27,6 +35,32 @@ export PATH="${KAFKA_BIN_DIR}/bin/:$PATH"
 # Configuration
 echo "advertised.listeners=PLAINTEXT://localhost:9092" >> ${KAFKA_BIN_DIR}/config/server.properties
 
-# Start Zookeeper and Kafka
-zookeeper-server-start.sh ${KAFKA_BIN_DIR}/config/zookeeper.properties > /tmp/zookeeper.log &
-kafka-server-start.sh ${KAFKA_BIN_DIR}/config/server.properties > /tmp/kafka.log &
+# Start Zookeeper and Kafka.
+#
+# Fully detach the daemons from the calling shell's stdin/stdout/stderr.
+# If any of these stay connected to the CI step's output pipe, GitHub
+# Actions keeps waiting for that pipe to close and the step hangs until it
+# is cancelled, even though this script has logically finished. Redirecting
+# all three descriptors (and disowning) lets the step complete while the
+# brokers keep running in the background.
+nohup zookeeper-server-start.sh ${KAFKA_BIN_DIR}/config/zookeeper.properties > /tmp/zookeeper.log 2>&1 < /dev/null &
+disown || true
+nohup kafka-server-start.sh ${KAFKA_BIN_DIR}/config/server.properties > /tmp/kafka.log 2>&1 < /dev/null &
+disown || true
+
+# Wait for Kafka broker to be ready before returning.
+# Without this, init_kafka.sh may try to create topics before the broker
+# is accepting connections, causing topic creation and data seeding to fail.
+echo "Waiting for Kafka broker to be ready on localhost:9092..."
+for i in $(seq 1 60); do
+  if ${KAFKA_BIN_DIR}/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
+    echo "Kafka broker is ready (attempt ${i})"
+    exit 0
+  fi
+  sleep 2
+done
+
+echo "ERROR: Kafka broker did not become ready in time" >&2
+cat /tmp/kafka.log || true
+cat /tmp/zookeeper.log || true
+exit 1
