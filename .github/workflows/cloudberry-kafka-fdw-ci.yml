@@ -332,40 +332,31 @@ jobs:
               2>&1 | tee "${TEST_LOG_ROOT}/kafka_fdw-install.log"
 
             export PGOPTIONS="-c optimizer=${OPTIMIZER}"
-            TESTS="analyze_test cbdb_test error_test json_producer_test json_test strict_test junk_test kafka_test multiple_brokers parallel producer_test"
+            set +e
+            make installcheck PG_CONFIG="${PG_CONFIG}" USE_PGXS=1 PGUSER=gpadmin \
+              2>&1 | tee "${TEST_LOG_ROOT}/kafka_fdw-installcheck-${OPTIMIZER_LABEL}.log"
+            TEST_STATUS=$?
+            set -e
 
-            # Start Kafka once, rebuild topics per test for isolation
-            ./test/run_kafka.sh
+            echo "=== Test completed with status: ${TEST_STATUS} ==="
 
-            OVERALL_STATUS=0
-            rm -f "${TEST_LOG_ROOT}/kafka_fdw-installcheck-${OPTIMIZER_LABEL}.log"
-
-            for t in $TESTS; do
-              echo "=== Running ${t} (optimizer=${OPTIMIZER}) ==="
-              ./test/init_kafka.sh 2>/dev/null || true
-
-              set +e
-              make NOINIT=1 installcheck TEST="${t}" PG_CONFIG="${PG_CONFIG}" USE_PGXS=1 PGUSER=gpadmin \
-                2>&1 | tee -a "${TEST_LOG_ROOT}/kafka_fdw-installcheck-${OPTIMIZER_LABEL}.log"
-              st=$?
-              set -e
-
-              if [ ${st} -ne 0 ]; then
-                OVERALL_STATUS=1
-                if [ -f regression.diffs ]; then
-                  echo "=== ${t} diffs ===" >> "${TEST_LOG_ROOT}/kafka_fdw-installcheck-${OPTIMIZER_LABEL}.log"
-                  cat regression.diffs >> "${TEST_LOG_ROOT}/kafka_fdw-installcheck-${OPTIMIZER_LABEL}.log"
-                fi
-              fi
-              rm -f regression.out regression.diffs results/*.out 2>/dev/null || true
-            done
+            # Capture diffs and results
+            if [ -f regression.diffs ]; then
+              cp -a regression.diffs "${TEST_LOG_ROOT}/${OPTIMIZER_LABEL}-regression.diffs"
+            fi
+            mkdir -p "${TEST_LOG_ROOT}/${OPTIMIZER_LABEL}-results"
+            cp -a results/*.out "${TEST_LOG_ROOT}/${OPTIMIZER_LABEL}-results/" 2>/dev/null || true
 
             passed=$(grep -c '^test.*ok' "${TEST_LOG_ROOT}/kafka_fdw-installcheck-${OPTIMIZER_LABEL}.log" 2>/dev/null || echo 0)
             failed=$(grep -c '^test.*FAILED' "${TEST_LOG_ROOT}/kafka_fdw-installcheck-${OPTIMIZER_LABEL}.log" 2>/dev/null || echo 0)
             echo "${OPTIMIZER_LABEL} (optimizer=${OPTIMIZER}): ${passed} passed, ${failed} failed"
-            echo "=== Test completed with status: ${OVERALL_STATUS} ==="
 
-            exit ${OVERALL_STATUS}
+            if [ ${TEST_STATUS} -ne 0 ]; then
+              echo "=== ${OPTIMIZER_LABEL} diffs ==="
+              cat regression.diffs 2>/dev/null || true
+            fi
+
+            exit ${TEST_STATUS}
           popd
           SCRIPT
 
@@ -392,6 +383,12 @@ jobs:
               echo "- Result: PASS"
             else
               echo "- Result: FAIL"
+              if [ -f "${KAFKA_FDW_SRC}/regression.diffs" ]; then
+                echo ""
+                echo '```diff'
+                cat "${KAFKA_FDW_SRC}/regression.diffs"
+                echo '```'
+              fi
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
