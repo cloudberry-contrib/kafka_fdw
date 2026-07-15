@@ -1,0 +1,79 @@
+/*
+ * Fixture schema for kafka_fdw protobuf regression test.
+ * See test/proto/pb_produce_regress.c and test/sql/protobuf_test.sql.
+ *
+ * UserEvent is intentionally a "kitchen sink" message: it exercises
+ * every protobuf scalar wire type, an enum, nested / repeated / map
+ * compound types, and a oneof, so the regression test covers the full
+ * set of types the decoder supports.
+ */
+syntax = "proto3";
+
+package com.acme;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/wrappers.proto";
+
+message Address {
+    string city    = 1;
+    string country = 2;
+}
+
+enum Color {
+    COLOR_UNSPECIFIED = 0;
+    RED               = 1;
+    GREEN             = 2;
+    BLUE              = 3;
+}
+
+message UserEvent {
+    /* --- core scalars (original fixture) --- */
+    int64            user_id    = 1;
+    string           event_ts   = 2;
+    string           event_type = 3;
+    double           amount     = 4;
+    bool             is_admin   = 5;
+
+    /* --- compound types --- */
+    Address            address    = 6;  /* nested message   -> jsonb  */
+    repeated string    tags       = 7;  /* repeated scalar  -> text[] */
+    repeated Address   prev_addrs = 8;  /* repeated message -> jsonb  */
+    map<string, int32> counters   = 9;  /* map              -> jsonb  */
+
+    /* --- remaining scalar wire types --- */
+    int32    i32   = 10;   /* -> int      */
+    uint32   u32   = 11;   /* -> bigint   */
+    uint64   u64   = 12;   /* -> numeric  */
+    sint32   s32   = 13;   /* zigzag  -> int     */
+    sint64   s64   = 14;   /* zigzag  -> bigint  */
+    fixed32  f32   = 15;   /* -> bigint   */
+    fixed64  f64   = 16;   /* -> numeric  */
+    sfixed32 sf32  = 17;   /* -> int      */
+    sfixed64 sf64  = 18;   /* -> bigint   */
+    float    flt   = 19;   /* -> real     */
+    bytes    blob  = 20;   /* -> bytea    */
+    Color    color = 21;   /* enum -> int (integer value) */
+
+    /* --- repeated non-string scalar --- */
+    repeated int32 scores = 22;  /* -> int[] */
+
+    /* --- oneof: exactly one member is set per message; inactive
+       members must decode to SQL NULL --- */
+    oneof payload {
+        int32  as_int  = 23;
+        string as_str  = 24;
+        bool   as_bool = 25;
+    }
+
+    /* --- well-known types: rendered to native PG types, not jsonb --- */
+    google.protobuf.Timestamp   created_at = 26;  /* -> timestamptz */
+    google.protobuf.Duration    elapsed    = 27;  /* -> interval    */
+    google.protobuf.Int32Value  opt_int    = 28;  /* wrapper -> int (nullable)  */
+    google.protobuf.StringValue opt_str    = 29;  /* wrapper -> text (nullable) */
+
+    /* --- bytes in compound types (exercise the hex / base64 paths for
+       binary-unsafe octets like NUL and backslash) --- */
+    repeated bytes     blobs    = 30;  /* -> bytea[] (\x hex elements) */
+    map<string, bytes> blob_map = 31;  /* -> jsonb   (base64 values)   */
+}

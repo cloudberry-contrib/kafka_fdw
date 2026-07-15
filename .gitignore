@@ -27,3 +27,13 @@ results
 bench/benchmarks*
 regression.*
 .DS_Store
+
+# Tests
+test/tmp/
+
+# Third Party
+thirdparty/
+
+# generated protobuf stubs / descriptors (build artifacts)
+test/proto/*.pb-c.*
+test/proto/*.desc

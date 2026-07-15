@@ -1,4 +1,5 @@
 #include "kafka_fdw.h"
+#include "parser_protobuf.h"
 #include "parser/parse_coerce.h"
 #include "utils/date.h"
 #include "utils/datetime.h"
@@ -139,6 +140,8 @@ KafkaReadAttributes(char *                  msg,
         return KafkaReadAttributesCSV(msg, msg_len, festate, unterminated_error);
     else if (format == JSON)
         return KafkaReadAttributesJson(msg, msg_len, festate, unterminated_error);
+    else if (format == PROTOBUF)
+        return KafkaReadAttributesProtobuf(msg, msg_len, festate, unterminated_error);
 
     return -1;
 }
@@ -150,6 +153,10 @@ KafkaWriteAttributes(KafkaFdwModifyState *festate, TupleTableSlot *slot, enum ka
         KafkaWriteAttributesCSV(festate, slot);
     else if (format == JSON)
         KafkaWriteAttributesJson(festate, slot);
+    else if (format == PROTOBUF)
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("Write into a protobuf-format kafka_fdw table is not supported")));
 }
 
 /*
