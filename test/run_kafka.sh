@@ -18,7 +18,6 @@ DIST=$(cat /etc/os-release | grep ^ID= | sed s/ID=//)
 echo
 
 # # Download Apache Kafka
-wget https://nexus.hashdata.dev/repository/raw-hosted/kafka/${KAFKA_ARCHIVE}
 if [ ! -f "${KAFKA_ARCHIVE}" ]; then
     wget https://downloads.apache.org/kafka/${KAFKA_VERSION}/${KAFKA_ARCHIVE}
 fi
