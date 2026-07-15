@@ -1,0 +1,6 @@
+[submodule "thirdparty/upb"]
+	path = thirdparty/upb
+	url = https://github.com/protocolbuffers/upb.git
+[submodule "thirdparty/utf8_range"]
+	path = thirdparty/utf8_range
+	url = https://github.com/protocolbuffers/utf8_range.git

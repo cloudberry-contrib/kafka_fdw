@@ -78,11 +78,14 @@
 
 extern double kafka_tuple_cost;
 
+typedef struct KafkaProtoDecoder KafkaProtoDecoder;
+
 enum kafka_msg_format
 {
     INVALID_FMT = -1,
     JSON,
-    CSV
+    CSV,
+    PROTOBUF
 };
 
 typedef enum kafka_op
@@ -177,6 +180,8 @@ typedef struct ParseOptions
     char *                delim;          /* column delimiter (must be 1 byte) */
     char *                quote;          /* CSV quote char (must be 1 byte) */
     char *                escape;         /* CSV escape char (must be 1 byte) */
+    char *                proto_message;    /* fully-qualified protobuf message name */
+    char *                proto_descriptor; /* path to serialized FileDescriptorSet (.desc) */
 } ParseOptions;
 
 /* scan koordination */
@@ -239,6 +244,7 @@ typedef struct KafkaFdwExecutionState
     StringInfoData       attname_buf;        /* buffer holding attribute names for json format */
     char **              attnames;           /* pointer into attname_buf */
     KafkaScanDataDesc *  scan_data_desc;     /* coordination point for parallel scans */
+    KafkaProtoDecoder   *proto_decoder;      /* protobuf decoder state (opaque; NULL for CSV/JSON) */
 } KafkaFdwExecutionState;
 
 /*

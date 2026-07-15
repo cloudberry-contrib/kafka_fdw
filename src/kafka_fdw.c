@@ -1,5 +1,7 @@
 #include "kafka_fdw.h"
 #include "compatibility.h"
+#include "parser_protobuf.h"
+#include "cdb/cdbvars.h"
 #include "parser/parsetree.h"
 #include "storage/spin.h"
 #include "utils/guc.h"
@@ -566,6 +568,10 @@ kafkaBeginForeignScan(ForeignScanState *node, int eflags)
     festate         = makeKafkaExecutionState(node->ss.ss_currentRelation, &kafka_options, &parse_options);
     node->fdw_state = (void *) festate;
 
+    /* Build the protobuf decoder. */
+    if (parse_options.format == PROTOBUF && Gp_role == GP_ROLE_EXECUTE)
+        festate->proto_decoder = KafkaProtoDecoderOpen(node->ss.ss_currentRelation, festate);
+
     /*
      * Init Kafka-related stuff
      */
@@ -920,6 +926,19 @@ ReadKafkaMessage(Relation                rel,
         catched_error = true;
         MemSet(nulls, true, num_attrs);
     }
+    else if (error && parse_options->format == PROTOBUF)
+    {
+        if (kafka_options->strict)
+            ereport(ERROR, (errcode(ERRCODE_BAD_COPY_FILE_FORMAT),
+                    errmsg("failed to decode Kafka protobuf message")));
+
+        catched_error = true;
+        if (kafka_options->junk_error_attnum != -1 &&
+            festate->junk_buf.len == 0)
+            appendStringInfoString(&festate->junk_buf,
+                                    "failed to decode Kafka protobuf message");
+        MemSet(nulls, true, num_attrs);
+    }
     /* to much data */
     else if (fldct > kafka_options->num_parse_col)
     {
@@ -979,6 +998,27 @@ ReadKafkaMessage(Relation                rel,
             nulls[m] = true;
             continue;
         }
+
+        /*
+         * Protobuf direct-Datum fast path: parser has already
+         * produced a typed Datum for this column at decode time,
+         * so we skip the sprintf + InputFunctionCall round-trip.
+         * Applies only to columns whose (proto scalar CType, PG
+         * atttype) pair was vetted at scan open; all other columns
+         * fall through to the cstring path below.  CSV / JSON never
+         * take this branch (proto_decoder is NULL).
+         */
+        if (parse_options->format == PROTOBUF &&
+            KafkaProtoDatumAvailable(festate->proto_decoder, fldnum))
+        {
+            bool  datum_null;
+            Datum d = KafkaProtoDatumGet(festate->proto_decoder, fldnum, &datum_null);
+            values[m] = d;
+            nulls[m]  = datum_null;
+            fldnum++;
+            continue;
+        }
+
         string = festate->raw_fields[fldnum++];
 
         if (string == NULL)
@@ -1088,6 +1128,12 @@ kafkaEndForeignScan(ForeignScanState *node)
 
     // MemoryContextReset(festate->batch_cxt);
     kafkaCloseConnection(festate);
+
+    if (festate->proto_decoder != NULL)
+    {
+        KafkaProtoDecoderClose(festate->proto_decoder);
+        festate->proto_decoder = NULL;
+    }
 
     pfree(festate->buffer);
 }

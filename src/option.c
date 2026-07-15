@@ -1,6 +1,16 @@
 #include "kafka_fdw.h"
 #include "mb/pg_wchar.h"
 
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/time.h>
+#include <unistd.h>
+
+#include "executor/spi.h"
+#include "utils/builtins.h"
+#include "utils/timestamp.h"
+
 #if PG_VERSION_NUM >= 130000
 #include "access/relation.h"
 #endif
@@ -50,6 +60,8 @@ static const struct KafkaFdwOption valid_options[] = {
     { "escape", ForeignTableRelationId },
     { "null", ForeignTableRelationId },
     { "encoding", ForeignTableRelationId },
+    { "proto_message", ForeignTableRelationId },   /* protobuf message name */
+    { "proto_desc", ForeignTableRelationId },       /* path to .desc file */
     { "force_not_null", AttributeRelationId },
     { "force_null", AttributeRelationId },
     { "offset", AttributeRelationId },
@@ -57,6 +69,7 @@ static const struct KafkaFdwOption valid_options[] = {
     { "junk", AttributeRelationId },
     { "junk_error", AttributeRelationId },
     { "json", AttributeRelationId },
+    { "protobuf", AttributeRelationId },
     /*
      * force_quote is not supported by kafka_fdw because it's for COPY TO for now.
      */
@@ -206,8 +219,22 @@ KafkaProcessParseOptions(ParseOptions *parse_options, List *options)
             }
             else if (strcmp(fmt, "json") == 0)
                 parse_options->format = JSON;
+            else if (strcmp(fmt, "protobuf") == 0)
+                parse_options->format = PROTOBUF;
             else
                 ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("format \"%s\" not recognized", fmt)));
+        }
+        else if (strcmp(defel->defname, "proto_message") == 0)
+        {
+            if (parse_options->proto_message)
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("conflicting or redundant options")));
+            parse_options->proto_message = defGetString(defel);
+        }
+        else if (strcmp(defel->defname, "proto_desc") == 0)
+        {
+            if (parse_options->proto_descriptor)
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("conflicting or redundant options")));
+            parse_options->proto_descriptor = defGetString(defel);
         }
         else if (strcmp(defel->defname, "delimiter") == 0)
         {
@@ -239,6 +266,24 @@ KafkaProcessParseOptions(ParseOptions *parse_options, List *options)
      * Check for incompatible options (must do these two before inserting
      * defaults)
      */
+
+    /*
+     * Protobuf is a binary format - delim / null_print / quote / escape are
+     * meaningless. Skip the CSV/text validation block below entirely, but do
+     * require the schema selector.
+     */
+    if (parse_options->format == PROTOBUF)
+    {
+        if (!parse_options->proto_message)
+            ereport(ERROR,
+                    (errcode(ERRCODE_FDW_ERROR),
+                        errmsg("protobuf format requires the \"proto_message\" table option")));
+        if (!parse_options->proto_descriptor)
+            ereport(ERROR,
+                    (errcode(ERRCODE_FDW_ERROR),
+                        errmsg("protobuf format requires the \"proto_desc\" table option")));
+        return;
+    }
 
     /* Set defaults for omitted options */
     if (!parse_options->delim)

@@ -9,7 +9,7 @@ Use with care. Pull requests welcome
 A simple  foreign data wrapper for Kafka which allows it to be treated as
 a table.
 
-Currently kafka_fdw allows message parsing in csv and json format.
+Currently kafka_fdw allows message parsing in csv, json and protobuf format.
 More might come in a future release.
 
 
@@ -18,6 +18,26 @@ More might come in a future release.
 The FDW uses the librdkafka C client library. https://github.com/edenhill/librdkafka
 to build against installed librdkafka and postgres run
 `make && make install`
+
+### Protobuf support dependency (upb)
+
+The `format 'protobuf'` decoder is built on top of **upb**, the small C
+runtime that ships *inside* Protocol Buffers.  upb and its `utf8_range`
+dependency are vendored as git submodules under `thirdparty/` and compiled
+**straight into `kafka_fdw.so`**, so the extension is fully self-contained:
+it has **no `libupb*.so` / `libprotobuf.so` runtime dependency** and needs
+nothing extra installed.  Fetch the submodules once before building:
+
+```sh
+git submodule update --init thirdparty/upb thirdparty/utf8_range
+make && make install
+```
+
+The submodules are pinned to the exact commits Protocol Buffers 24.3 uses
+(`upb` @ `42cd0893`, `utf8_range` @ `de0b4a8`).  Because we link upb
+statically we are *not* coupled to the platform protobuf version; to move
+to a newer upb, look up the matching commit in that protobuf release's
+`protobuf_deps.bzl` and bump the submodules together.
 
 to run test
 
@@ -133,6 +153,130 @@ as a row in the above table.
 
 Currently the Kafka FDW does not support series of JSON arrays, only JSON objects.  JSON arrays
 in objects can be presented as text or JSON/JSONB fields, however.
+
+
+## Protobuf
+
+Protobuf messages are decoded with the message schema, not by position.
+Each foreign-table column is bound to a field of the proto message via
+`OPTIONS (protobuf '<field_name>')` — a top-level field, or a nested one
+via a dotted path (see "Nested fields" below); the message type itself is
+selected with the table option `proto_message`, and the serialized
+`FileDescriptorSet` with `proto_desc`.  The descriptor must first be
+registered into the catalog:
+
+```SQL
+SELECT kafka_fdw.register_proto_descriptor('/path/to/events.desc');
+```
+
+### Generating the descriptor
+
+The `.desc` is a serialized `FileDescriptorSet` produced by `protoc`.
+**Always pass `--include_imports`** so the file is self-contained — it
+must carry the descriptors of every `.proto` your schema imports
+(including the well-known types), because the FDW resolves the whole type
+graph from this one file:
+
+```sh
+protoc --include_imports \
+       --descriptor_set_out=events.desc \
+       -I. -I/usr/local/include \
+       events.proto
+```
+
+If a `.proto` `import`s another file and `--include_imports` is omitted,
+the imported types are missing from the `.desc` and registering or
+scanning fails with a "missing dependency" error.  With it, imports
+(your own files and `google/protobuf/*`) resolve and decode normally —
+you can even reach into an imported message type with a dotted path.
+
+```SQL
+CREATE FOREIGN TABLE pb_events (
+    part       int    OPTIONS (partition 'true'),
+    offs       bigint OPTIONS (offset 'true'),
+    user_id    bigint            OPTIONS (protobuf 'user_id'),
+    amount     double precision  OPTIONS (protobuf 'amount'),
+    address    jsonb             OPTIONS (protobuf 'address'),
+    tags       text[]            OPTIONS (protobuf 'tags')
+)
+SERVER kafka_server OPTIONS (
+    format        'protobuf',
+    topic         'contrib_regress_protobuf',
+    proto_message 'com.acme.UserEvent',
+    proto_desc    '/path/to/events.desc',
+    batch_size    '10', buffer_delay '100');
+```
+
+### Type mapping
+
+A scalar field is rendered to text and then fed to the column type's
+input function, so the column type is flexible — any type whose input
+accepts that text works (e.g. an `int64` field can go to `bigint`,
+`numeric` or `text`).  The column types below are the natural/recommended
+choice; the "unsigned" note flags values that can exceed the signed range
+and therefore need a wider column.
+
+| Protobuf type | Recommended column type | Notes |
+|---|---|---|
+| `double` | `double precision` | |
+| `float` | `real` | |
+| `int32`, `sint32`, `sfixed32` | `int` | |
+| `int64`, `sint64`, `sfixed64` | `bigint` | |
+| `uint32`, `fixed32` | `bigint` | unsigned; exceeds `int` range |
+| `uint64`, `fixed64` | `numeric` | unsigned; exceeds `bigint` range |
+| `bool` | `bool` | |
+| `string` | `text` | |
+| `bytes` | `bytea` | any byte value (built directly as a `bytea` datum; `\x` hex on the text/array paths). Inside `jsonb` (map/repeated) bytes are base64, per proto3 JSON |
+| `enum` | `int` | integer value, not the label |
+| nested `message` | `jsonb` | canonical proto3 JSON (or flatten a field out with a dotted path, below) |
+| `repeated <scalar>` | `<scalar>[]` (e.g. `int[]`, `text[]`) | PostgreSQL array |
+| `repeated <message>` | `jsonb` | JSON array of objects |
+| `map<K,V>` | `jsonb` | JSON object; keys are always strings |
+| `google.protobuf.Timestamp` | `timestamptz` | `seconds` + `nanos`, via PostgreSQL's `timestamptz` I/O (microsecond precision) |
+| `google.protobuf.Duration` | `interval` | |
+| scalar wrappers (`Int32Value`, `StringValue`, `BoolValue`, ...) | the wrapped scalar (`int`, `text`, `bool`, ...) | absent wrapper → SQL `NULL` |
+| `Struct`, `Value`, `ListValue`, `Any`, `FieldMask` | `jsonb` | canonical proto3 JSON |
+
+Singular well-known types are decoded to the native PostgreSQL type
+above.  (Inside a `repeated`/`map`/`jsonb` column they stay in canonical
+JSON form.)
+
+### Nested fields (dotted paths)
+
+A column can bind to a field inside a singular sub-message with a
+dot-separated path, so you do not have to route everything through
+`jsonb`:
+
+```SQL
+    addr_city    text OPTIONS (protobuf 'address.city'),
+    addr_country text OPTIONS (protobuf 'address.country')
+```
+
+Every path component except the last must be a singular (non-repeated)
+message field.  If any sub-message along the path is absent, the column
+is SQL `NULL`.
+
+### oneof
+
+Map each `oneof` member to its own column.  Only the member actually set
+in a given message decodes to a value; the other members of that `oneof`
+decode to SQL `NULL`.  For example, for `oneof payload { int32 as_int;
+string as_str; bool as_bool; }`:
+
+```SQL
+    as_int  int  OPTIONS (protobuf 'as_int'),
+    as_str  text OPTIONS (protobuf 'as_str'),
+    as_bool bool OPTIONS (protobuf 'as_bool')
+```
+
+### Limitations
+
+* Dotted paths descend through **singular** sub-messages only; you cannot
+  index into a `repeated` field or a `map` from a path.  Map those to a
+  `jsonb` column and use the JSON operators (`->`, `->>`) instead.
+* `enum` values are emitted as their integer, not their symbolic name.
+* Map iteration order is not stable; compare individual keys rather than
+  the whole `jsonb` object if you need deterministic results.
 
 
 ## Querying

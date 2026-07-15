@@ -6,7 +6,7 @@ DATA 		 = $(filter-out $(EXTENSION)--$(EXTVERSION).sql, $(wildcard *--*.sql)) $(
 # DOCS         = $(wildcard doc/*.md)
 TESTS        = $(wildcard test/sql/*.sql)
 REGRESS      ?= $(patsubst test/sql/%.sql,%,$(TESTS))
-REGRESS_OPTS = --inputdir=test --load-extension=$(EXTENSION)
+REGRESS_OPTS = --inputdir=test --outputdir=test --load-extension=$(EXTENSION)
 EXTRA_CLEAN  = $(EXTENSION)--$(EXTVERSION).sql
 MODULE_big   = $(EXTENSION)
 OBJS         =  $(patsubst %.c,%.o,$(wildcard src/*.c))
@@ -15,6 +15,8 @@ PG_CPPFLAGS  = -std=c99 -Wall -Wextra -Wno-unused-parameter
 
 
 PLATFORM 	 = $(shell uname -s)
+
+include upb.mk
 
 ifndef NOINIT
 REGRESS_PREP = prep_kafka
@@ -55,7 +57,7 @@ prep_kafka:
 
 TESTS_AUTH = $(wildcard test/sql/auth/*.sql)
 REGRESS_AUTH ?= $(patsubst test/sql/%.sql,%,$(TESTS_AUTH))
-REGRESS_OPTS_AUTH = --inputdir=test --load-extension=$(EXTENSION)
+REGRESS_OPTS_AUTH = --inputdir=test --outputdir=test --load-extension=$(EXTENSION)
 
 installcheck-auth:
 	./test/run_kafka_auth.sh
