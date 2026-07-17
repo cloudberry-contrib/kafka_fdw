@@ -817,8 +817,25 @@ kafkaIterateForeignScan(ForeignScanState *node)
               (errcode(ERRCODE_FDW_ERROR),
                errmsg_internal("kafka_fdw got an error fetching data %s", rd_kafka_err2str(rd_kafka_last_error()))));
 
-        if (festate->buffer_count <= 0) /* no more messages within timeout*/
+        if (festate->buffer_count <= 0) /* no messages within timeout */
         {
+            /*
+             * An empty poll within buffer_delay does NOT mean the partition is
+             * exhausted -- the broker fetch may still be in flight.  Only
+             * advance to the next partition once we have actually reached the
+             * high watermark (bounded by offset_lim if the query set one);
+             * otherwise retry the same partition.  This fixes silent
+             * whole-partition drops when a fast consumer (e.g. protobuf)
+             * outruns the fetch and mis-reads a timeout as end-of-partition.
+             */
+            int64 end_off = scan_p->high;
+
+            if (scan_p->offset_lim >= 0 && scan_p->offset_lim + 1 < end_off)
+                end_off = scan_p->offset_lim + 1;
+
+            if (festate->cur_offset < end_off)
+                continue; /* fetch still in flight; retry same partition */
+
             if (!kafkaNext(festate))
                 return slot;
         }
@@ -843,6 +860,12 @@ kafkaIterateForeignScan(ForeignScanState *node)
 
     ReadKafkaMessage(node->ss.ss_currentRelation, festate, message, ccxt, &slot->tts_values, &slot->tts_isnull);
     ExecStoreVirtualTuple(slot);
+
+    /*
+     * track read position so the timeout branch can compare against the
+     * high watermark and know whether more data is still expected
+     */
+    festate->cur_offset = message->offset + 1;
 
     rd_kafka_message_destroy(message);
     festate->buffer_cursor++;
@@ -1234,6 +1257,17 @@ kafkaStart(KafkaFdwExecutionState *festate)
         ereport(ERROR,
                 (errcode(ERRCODE_FDW_ERROR),
                  errmsg_internal("kafka_fdw: Failed to get watermarks %s", rd_kafka_err2str(err))));
+
+    /*
+     * Remember the high watermark (log-end offset) and the first offset we
+     * will read, so the consume loop can tell "the broker fetch is still in
+     * flight" (retry) apart from "this partition is truly exhausted" (advance).
+     * Relying on an empty consume_batch within buffer_delay as end-of-partition
+     * silently dropped whole partitions whenever a fetch was slower than the
+     * timeout -- notably on the faster protobuf path.
+     */
+    scan_p->high        = high;
+    festate->cur_offset = MAX(low, scan_p->offset);
 
     DEBUGLOG("%s part: %d, offs: %lld (%ld / %lld), topic: %s",
              __func__,
