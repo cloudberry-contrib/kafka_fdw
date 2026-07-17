@@ -140,6 +140,7 @@ typedef struct KafkaScanP
     int32 partition;
     int64 offset;
     int64 offset_lim;
+    int64 high;			/* high watermark (log-end offset) queried at kafkaStart */
 } KafkaScanP;
 
 typedef struct KafkaPartitionList
@@ -232,6 +233,7 @@ typedef struct KafkaFdwExecutionState
     int                  max_fields;         /* max number of raw_fields */
     ssize_t              buffer_count;       /* number of messages currently in buffer*/
     ssize_t              buffer_cursor;      /* current message */
+    int64                cur_offset;         /* next offset to read on current partition */
     FmgrInfo *           in_functions;       /* array of input functions for each attrs */
     Oid *                typioparams;        /* array of element types for in_functions */
     Bitmapset *          attisarray;         /* bitmap of attributes of array type */
