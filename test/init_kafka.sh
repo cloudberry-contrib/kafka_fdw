@@ -116,6 +116,32 @@ cat > "${PB_TMP}/desc_path.inc" <<EOF
 \set desc_path '${PB_DESC_ABS}'
 EOF
 
+# Locate the OpenSSL 3 runtime libs portably.  Their path differs by
+# arch/distro (RH x86_64: /usr/lib64, Debian arm64: /usr/lib/aarch64-linux-gnu,
+# ...), so hard-coding /usr/lib64 breaks on other platforms.  Link them by
+# absolute path (rather than -lssl -lcrypto) so the earlier -L/usr/local/lib
+# can't pull in an incompatible openssl; fall back to -lssl -lcrypto only if
+# they cannot be located.
+ossl_find() {
+    local p
+    p=$(ldconfig -p 2>/dev/null | awk -v n="$1" '$1 == n { print $NF; exit }')
+    [ -n "$p" ] && { printf '%s\n' "$p"; return 0; }
+    for d in /usr/lib64 /lib64 /usr/lib /lib \
+             /usr/lib/aarch64-linux-gnu /usr/lib/x86_64-linux-gnu \
+             /usr/local/lib64 /usr/local/lib; do
+        [ -e "$d/$1" ] && { printf '%s\n' "$d/$1"; return 0; }
+    done
+    return 1
+}
+SSL_LIB=$(ossl_find libssl.so.3)
+CRYPTO_LIB=$(ossl_find libcrypto.so.3)
+if [ -n "$SSL_LIB" ] && [ -n "$CRYPTO_LIB" ]; then
+    OSSL_LINK="$SSL_LIB $CRYPTO_LIB"
+else
+    echo "kafka_fdw regress: libssl.so.3/libcrypto.so.3 not found, falling back to -lssl -lcrypto" >&2
+    OSSL_LINK="-lssl -lcrypto"
+fi
+
 gcc -O2 -std=gnu99 \
     -I/usr/local/include \
     -I"${PB_TMP}" \
@@ -127,7 +153,7 @@ gcc -O2 -std=gnu99 \
     -o "${PB_TMP}/pb_produce_regress" \
     -Wl,-rpath,/usr/local/lib -L/usr/local/lib \
     -lrdkafka \
-    /usr/lib64/libssl.so.3 /usr/lib64/libcrypto.so.3 \
+    ${OSSL_LINK} \
     -lprotobuf-c -lz -lpthread -lrt -llz4 -lsasl2 -lm -ldl -lzstd -lcurl \
     || { echo "kafka_fdw regress: pb_produce_regress build failed" >&2; exit 1; }
 
