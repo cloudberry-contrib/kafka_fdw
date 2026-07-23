@@ -1,6 +1,7 @@
+-- start_ignore
 \i test/sql/setup.inc
 \i test/tmp/desc_path.inc
-
+-- end_ignore
 -- ---------------------------------------------------------------
 -- Protobuf format regression test.
 --
