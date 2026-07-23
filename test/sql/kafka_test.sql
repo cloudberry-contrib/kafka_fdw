@@ -1,5 +1,15 @@
 \i test/sql/setup.inc
 
+-- Normalize volatile EXPLAIN ANALYZE numbers before diffing: the number of
+-- rows a Kafka Foreign Scan reads varies run-to-run.  gpdiff applies these
+-- to both the expected and the actual output, so any count matches.
+-- start_matchsubs
+-- m/actual rows=\d+/
+-- s/actual rows=\d+/actual rows=N/
+-- m/loops=\d+/
+-- s/loops=\d+/loops=N/
+-- end_matchsubs
+
 SET max_parallel_workers_per_gather = 0;
 
 /*

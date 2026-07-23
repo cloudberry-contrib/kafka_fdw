@@ -51,7 +51,7 @@ $(EXTENSION)--$(EXTVERSION).sql: sql/$(EXTENSION).sql
 
 prep_kafka:
 	./test/run_kafka.sh
-	./test/init_kafka.sh
+	PG_CONFIG='$(PG_CONFIG)' ./test/init_kafka.sh
 
 .PHONY:	prep_kafka
 
